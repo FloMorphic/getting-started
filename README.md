@@ -5,7 +5,7 @@
 **The open-source AI harness, built on the Inflowenger context runtime.**
 
 The install path, the developer tooling, and the layered documentation for
-FloMorphic — the first product built end-to-end on [Inflowenger](https://inflowenger.dev).
+FloMorphic — the first product built end-to-end on [Inflowenger](https://inflowenger.com).
 
 `Inflowenger` · `inflow-fusion` · `FloMorphic API` · `FloMorphic Web App` · `Builtin plugin nodes`
 
