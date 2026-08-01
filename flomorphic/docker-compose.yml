@@ -1,0 +1,96 @@
+# FloMorphic — the canvas, its API and the builtin plugin nodes, in one service.
+#
+# One container on purpose: the canvas is static assets, the API is a single Go
+# binary, and the plugin nodes cannot start until the API has minted their NATS
+# credential (POST /extension/plugin/cred). Splitting them would buy nothing but
+# a bootstrap dance across three containers. nginx inside serves the SPA and
+# proxies /api + /ws to the API on the loopback, so the browser only ever needs
+# ONE port and there is no CORS and no baked-in backend host name.
+#
+# Requires the Inflowenger platform (Infra + a Fractal) to be up FIRST — this
+# stack joins the same external `inflow_net` network to reach Infra by name.
+# Get it from https://github.com/Inflowenger/getting-started, or let this repo's
+# install.sh do both.
+#
+#   cp .env.example .env      # set INFLOW_INFRA_JWT_SECRET = the platform's
+#                             # API_JWT_SECRET (Infra's API Secret Key)
+#   docker compose up -d
+#   open http://localhost:8090
+#
+name: flomorphic
+
+services:
+  flomorphic:
+    image: ${FLOMORPHIC_IMAGE:-mehdishokohi/flomorphic:latest}
+    container_name: flomorphic
+    restart: unless-stopped
+    environment:
+      # ── runtime wiring ────────────────────────────────────────────────────
+      # Infra's REST API. The NATS endpoint the API and the plugins connect to
+      # is derived from this host (:4222), so it is the only address to set.
+      # Empty ⇒ the API serves CRUD only: you can design and save workflows,
+      # but Run does nothing and no plugin node is credentialed.
+      INFLOW_INFRA_API: ${INFLOW_INFRA_API:-http://inflow-infra:8022}
+      # Infra's API Secret Key — the same value as the platform's API_JWT_SECRET.
+      # Not enforced here: with it empty (or INFLOW_INFRA_API empty) the stack
+      # still comes up CRUD-only, which is a legitimate standalone mode. The
+      # container says so in its logs rather than refusing to start.
+      INFLOW_INFRA_JWT_SECRET: ${INFLOW_INFRA_JWT_SECRET:-}
+      # Guard this API's own CRUD routes with an HS256 bearer. Off by default,
+      # matching the API's standalone behaviour.
+      AUTH_ENABLED: ${AUTH_ENABLED:-false}
+      API_JWT_SECRET: ${API_JWT_SECRET:-}
+      DB_SOURCE: ${DB_SOURCE:-/data/flomorphic.db}
+
+      # ── builtin plugin nodes (llm, mcp, …) ────────────────────────────────
+      # Cloned from one repo and started by the container's entrypoint once the
+      # API is up, all sharing a single credential minted on the builtin-plugins
+      # account. Each node's PLUGIN_ID comes from morph-api's seed, so saved
+      # workflows keep resolving across reinstalls.
+      PLUGINS_ENABLED: ${PLUGINS_ENABLED:-1}
+      PLUGINS_REPO: ${PLUGINS_REPO:-https://github.com/FloMorphic/builtin-plugins.git}
+      PLUGINS_REF: ${PLUGINS_REF:-main}
+      # Comma-separated allow-list of folders to run; empty = every plugin found.
+      PLUGINS: ${PLUGINS:-}
+
+      # ── source refs (self-building image only) ────────────────────────────
+      # The published image compiles its sources at container start; these pick
+      # the branch or tag. Ignored by a baked image (install.sh --build).
+      API_REF: ${API_REF:-main}
+      WAPP_REF: ${WAPP_REF:-main}
+    volumes:
+      # SQLite database (workflows, contexts, prompts, human tasks, vectors).
+      # Without this, every restart starts from an empty canvas.
+      - ./data:/data
+      # Checkout + Go module cache + pnpm store for the self-building image, so
+      # a restart is quick instead of a full re-clone and rebuild. Harmless
+      # (just plugin sources) with a baked image.
+      - flomorphic-src:/src
+    ports:
+      # The canvas — and everything the browser needs, via nginx.
+      - "${FLOMORPHIC_PORT:-8090}:80"
+      # The API, published directly for curl/scripts/other tools. Not needed by
+      # the canvas. Defaults to 8026 so it never collides with inflow-inspector-api
+      # on 8025.
+      - "${FLOMORPHIC_API_PORT:-8026}:8025"
+    networks:
+      - inflow_net
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1/healthz"]
+      # The self-building image clones and compiles on first start, which can
+      # take several minutes — hence the long start period.
+      start_period: 600s
+      start_interval: 5s
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  # Shared, externally-managed network (fixed name, no compose project prefix)
+  # so this stack lands on the exact same network as Infra and the Fractals:
+  #   docker network create inflow_net
+  inflow_net:
+    external: true
+
+volumes:
+  flomorphic-src:

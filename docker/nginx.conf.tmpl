@@ -1,0 +1,90 @@
+# nginx config template for the combined FloMorphic image.
+#
+# The entrypoint renders this to /etc/nginx/nginx.conf, substituting the three
+# __TOKENS__ below, then runs nginx in the foreground alongside flomorphic-api.
+#
+# Why a proxy at all: the canvas is a static SPA whose backend URL is baked at
+# BUILD time (VITE_API_BASE_URL). Baking a host name would tie one image to one
+# machine and drag CORS in with it. Instead the SPA is built with a *relative*
+# base (/api), so every request is same-origin and this server routes it:
+#
+#   /            -> the built SPA (hash router, so no history fallback needed)
+#   /api/*       -> flomorphic-api, /api prefix stripped
+#   /ws/*        -> flomorphic-api, WebSocket upgrade (the runtime log stream)
+#
+# Workers run as the `nginx` user created by the alpine package — it owns the
+# proxy temp dirs under /var/lib/nginx, which the master (root) does not create.
+user       nginx;
+worker_processes  auto;
+error_log  /dev/stderr  warn;
+pid        /run/nginx/nginx.pid;
+
+events {
+    worker_connections  1024;
+}
+
+http {
+    include       /etc/nginx/mime.types;
+    default_type  application/octet-stream;
+    access_log    /dev/stdout;
+
+    sendfile        on;
+    tcp_nopush      on;
+    keepalive_timeout  65;
+    client_max_body_size 32m;
+    server_tokens   off;
+
+    # Workflow JSON and log frames compress well; assets are already minified.
+    gzip            on;
+    gzip_types      application/json application/javascript text/css image/svg+xml;
+
+    map $http_upgrade $connection_upgrade {
+        default upgrade;
+        ''      close;
+    }
+
+    server {
+        listen      __WEB_PORT__;
+        server_name _;
+        root        __WEB_ROOT__;
+        index       index.html;
+
+        # Container-level liveness (the installer polls this). Kept off /health
+        # so it can never be confused with the API's own /health.
+        location = /healthz {
+            access_log off;
+            add_header Content-Type text/plain;
+            return 200 "ok\n";
+        }
+
+        # The API is mounted at the root of its own server (/flow, /context, …),
+        # so the trailing slash on proxy_pass strips the /api prefix.
+        location /api/ {
+            proxy_pass         http://127.0.0.1:__API_PORT__/;
+            proxy_http_version 1.1;
+            proxy_set_header   Host              $host;
+            proxy_set_header   X-Real-IP         $remote_addr;
+            proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+            proxy_set_header   X-Forwarded-Proto $scheme;
+            proxy_read_timeout 300s;
+        }
+
+        # Engine event stream (api/wslog mounts /ws/:id; the canvas connects to
+        # /ws/flomorphic). Long read timeout so an idle canvas keeps its socket.
+        location /ws/ {
+            proxy_pass         http://127.0.0.1:__API_PORT__;
+            proxy_http_version 1.1;
+            proxy_set_header   Upgrade    $http_upgrade;
+            proxy_set_header   Connection $connection_upgrade;
+            proxy_set_header   Host       $host;
+            proxy_read_timeout 3600s;
+            proxy_send_timeout 3600s;
+        }
+
+        # SPA. Vite builds with base './' and the router is hash-based, so a
+        # plain file lookup with an index.html fallback is enough.
+        location / {
+            try_files $uri $uri/ /index.html;
+        }
+    }
+}

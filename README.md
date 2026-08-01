@@ -95,12 +95,18 @@ repository is the entry point:
   question, and links into the deep docs that live with the code.
 
 Start here. Read the concepts below, run the installer, then follow the map into
-whichever layer you need.
+whichever layer you need. In a hurry:
 
-> **Status.** The concept and the map are complete and current. The installer and
-> developer tooling are being assembled in this repo now — see
-> [Roadmap of this repo](#roadmap-of-this-repo). Until they land, the manual paths in
-> each component's own README are the source of truth.
+```bash
+curl -fsSL https://raw.githubusercontent.com/FloMorphic/getting-started/main/install.sh | bash
+```
+
+…and the canvas is on http://localhost:8090 — details in [Install](#install).
+
+> **Status.** The concept, the map and the install path are current: `install.sh`
+> and the compose stack are here — see [Install](#install). The developer tooling
+> (plugin scaffolding, resets, an end-to-end smoke check) is still being assembled;
+> until it lands, each component's own README is the source of truth for it.
 
 ---
 
@@ -541,25 +547,106 @@ their own isolated accounts.
 
 ---
 
-## Roadmap of this repo
+## Install
 
-What lands here, in order:
+```bash
+curl -fsSL https://raw.githubusercontent.com/FloMorphic/getting-started/main/install.sh | bash
+```
 
-- [ ] **`install.sh`** — one prompt-driven script: platform (Infra + Fractal),
-      FloMorphic API + web app, and the builtin plugin nodes, on a shared Docker
-      network. Env-var drivable for unattended installs, in the shape of the
-      [platform installer](https://github.com/Inflowenger/getting-started).
-- [ ] **Compose stacks** — the real `docker compose` files the script writes, so
-      you manage the result by hand afterwards.
+Docker and the Compose v2 plugin are the only prerequisites. The script asks five
+things and does the rest:
+
+| It asks | Because |
+| --- | --- |
+| **Install directory** | where the compose stacks and the database land |
+| **Platform: the one already running, or a new one?** | FloMorphic is a product *on* the Inflowenger runtime. A new platform is installed by [the Inflowenger installer](https://github.com/Inflowenger/getting-started) itself — one source of truth, not a copy |
+| **Image: pull, or build from source?** | pull the published image, or `--build` a local one from the repos |
+| **Builtin plugin nodes (llm, mcp)?** | without them the LLM and MCP nodes have nothing to execute |
+| **Ports** | the canvas (`8090`) and the API (`8026`) |
+
+Everything it asks can be set with an env var instead (`ASSUME_YES=1` for an
+unattended run) — see the header of [`install.sh`](./install.sh).
+
+```
+<install dir>/
+├── platform/          Infra + Fractal        (only when it installs one for you)
+├── inspector/         inflow-inspector       (only if you opt in)
+└── flomorphic/
+    ├── docker-compose.yml
+    ├── .env           image ref, ports, refs, and the shared API Secret Key
+    └── data/          the SQLite database — workflows, contexts, prompts, vectors
+```
+
+When it finishes: the canvas on **http://localhost:8090**, the API on
+**http://localhost:8026**, Infra on **http://localhost:8022**.
+
+```bash
+cd <install dir>/flomorphic
+docker compose logs -f          # follow the first boot (it compiles — see below)
+docker compose down             # stop
+docker compose up -d            # start again
+```
+
+### One container, on purpose
+
+The canvas, the API and the plugin nodes ship as **one image**:
+
+```
+     browser ──► :8090 ─── nginx ──┬── /            the canvas (static SPA)
+                                   ├── /api/*  ───► flomorphic-api  :8025
+                                   └── /ws/*   ───►      "          (log stream)
+                                                          │
+                                            NATS ◄────────┤  llm plugin node
+                                     (Infra :4222) ◄──────┘  mcp plugin node
+```
+
+Two reasons, both structural rather than cosmetic:
+
+- **The canvas bakes its backend URL at build time.** Baking a host name would tie
+  one image to one machine and drag CORS in with it. Instead the SPA is built with
+  a *relative* base (`/api`) and nginx routes it, so every request is same-origin.
+  One port to publish, and the same image works on a laptop, a LAN box or a server.
+- **A plugin node cannot start before the API does.** Each one needs a NATS
+  credential on the builtin-plugins account, and the component that mints it is
+  `flomorphic-api` itself (`POST /extension/plugin/cred`). So the container's
+  entrypoint starts the API, waits for `/health`, mints **one** multi-access
+  credential, clones the plugin repo, and runs every plugin folder in it with that
+  credential — each under the `PLUGIN_ID` the API's seed assigns to its builtin
+  node, so saved workflows keep resolving across reinstalls. Adding a plugin to
+  [`builtin-plugins`](https://github.com/FloMorphic/builtin-plugins) is enough; no
+  image change is needed.
+
+Point `PLUGINS_REPO` / `PLUGINS_REF` somewhere else to run your own set, or
+`PLUGINS_ENABLED=0` to run the canvas without any.
+
+### The two images
+
+| | What it does | When |
+| --- | --- | --- |
+| **self-building** (published, the default) | ships only tooling and clones + compiles morph-api and morph-wapp at container **start**, native to your CPU | first start takes a few minutes and needs network; one manifest serves amd64 and arm64 |
+| **baked** (`install.sh --build`) | compiles everything at image-build time | starts in seconds; what CI publishes per-arch |
+
+Both are driven by the same entrypoint and the same env vars — only the moment of
+compilation differs. `/src` holds the checkout, the Go module cache and the pnpm
+store, so restarts skip the work. `API_REF` / `WAPP_REF` / `PLUGINS_REF` in
+`flomorphic/.env` pick the branch or tag each source is built from; pin release
+tags for reproducible restarts.
+
+Dockerfiles: [`docker/Dockerfile.flomorphic-src`](./docker/Dockerfile.flomorphic-src)
+(self-building) and [`docker/Dockerfile.flomorphic`](./docker/Dockerfile.flomorphic)
+(baked). Each component repo also carries its own Dockerfile — `flomorphic-api`
+(API + plugin nodes) and `flomorphic-wapp` (canvas + proxy) — for a split
+deployment or a CI pipeline that publishes them separately.
+
+### Still on the roadmap
+
 - [ ] **Developer tools** — local dev wiring (API + Vite + plugins against a running
       platform), plugin scaffolding, database/context resets, and a smoke check that
       runs a known flow end to end.
 - [ ] **Layered docs** — the map below, filled in with a walkthrough per layer:
       *use it* → *extend it with a plugin* → *build your own product on the runtime*.
 
-Until these land, use each component's own README — they are current and complete.
-
-### Meanwhile: running from source
+### Running from source
 
 ```bash
 # 1. Platform (Infra + Fractal) — see Inflowenger/getting-started
@@ -581,12 +668,16 @@ The API's inflow runtime is **optional**: leave `INFLOW_INFRA_API` unset and it
 runs CRUD-only, which is enough to design and save workflows. Set it, and `Run`
 goes live.
 
-| Service | Default port |
-| --- | --- |
-| Infra API | `8022` |
-| NATS | `4222` (monitoring `8222`) |
-| FloMorphic API | `8025` |
-| FloMorphic canvas (dev) | `5173` |
+| Service | From source | Installed |
+| --- | --- | --- |
+| Infra API | `8022` | `8022` |
+| NATS | `4222` (monitoring `8222`) | same |
+| FloMorphic canvas | `5173` (Vite dev server) | **`8090`** — and the API behind it on `/api` |
+| FloMorphic API | `8025` | `8026` on the host, `8025` inside the container |
+| inflow-inspector | `8080` (panel) · `8025` (its API) | same |
+
+> The installed canvas and API sit on `8090`/`8026` rather than `5173`/`8025` so a
+> FloMorphic install and an inflow-inspector install can run side by side.
 
 ---
 
