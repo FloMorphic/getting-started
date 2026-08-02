@@ -111,8 +111,28 @@ is_true() {
     esac
 }
 
+# The remote's default branch — `main` in one repo, `master` in the next.
+git_default_ref() { # <repo>
+    git ls-remote --symref "$1" HEAD 2>/dev/null \
+      | sed -n 's|^ref: refs/heads/||p' | cut -f1 | head -n 1
+}
+
 git_sync() { # <repo> <ref> <dir>
     _repo="$1"; _ref="$2"; _dir="$3"
+    # FloMorphic is a wrapped product: the version tag belongs to the image, not
+    # to morph-api / morph-wapp / builtin-plugins, which are tracked at their
+    # default branch and are NOT expected to carry a matching tag. That branch is
+    # not spelled the same everywhere, and a ref that is not on the remote would
+    # otherwise fail the clone several minutes into a first start — so resolve it
+    # against the remote and fall back to whatever HEAD points at.
+    if [ -z "$_ref" ] || ! git ls-remote --exit-code "$_repo" "$_ref" >/dev/null 2>&1; then
+        _default="$(git_default_ref "$_repo")"
+        if [ -n "$_default" ]; then
+            [ -n "$_ref" ] && [ "$_ref" != "$_default" ] && \
+                warn "$(basename "$_dir"): no ref '$_ref' on the remote — using its default branch '$_default'"
+            _ref="$_default"
+        fi
+    fi
     if [ -d "$_dir/.git" ]; then
         log "updating $(basename "$_dir") -> $_ref"
         git -C "$_dir" fetch --depth 1 origin "$_ref"

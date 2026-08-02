@@ -8,9 +8,16 @@
 # separate api/wapp image.
 #
 # The version is the repo's own git tag — this repo is the release marker for
-# the product, so `git tag v0.2.0 && make release` is the whole ceremony. The
-# component repos (morph-api, morph-wapp, builtin-plugins) are pulled in at
-# API_REF / WAPP_REF / PLUGINS_REF, which default to main.
+# the product, so `git tag v0.2.0 && make release` is the whole ceremony.
+#
+# That tag names the IMAGE, and nothing else. FloMorphic is a wrapped product
+# built from several repos, and making all of them carry one synchronised version
+# would mean tagging four repos in lockstep for every release — cost with no
+# reader. So morph-api, morph-wapp and builtin-plugins are tracked at their
+# DEFAULT BRANCH, and a ref the remote does not have (main here, master there)
+# resolves to its HEAD instead of failing the build. Pin a release to exact
+# component refs only when you want to:
+#   make release API_REF=v0.3.0 WAPP_REF=v0.3.0 PLUGINS_REF=v0.3.0
 #
 #   make tag VERSION=v0.2.0     # annotate + push the tag this release is named after
 #   make release                # multi-arch :$(VERSION) + :latest, pushed
@@ -38,8 +45,10 @@
 VERSION    := $(shell git describe --tags --abbrev=0 2>/dev/null)
 IMAGE_NAME := mehdishokohi/flomorphic
 
-# What the image is built from. These are branches or tags in the component
-# repos, not this repo's tag — they only coincide if you tag all four alike.
+# What the image is built from: branches or tags in the component repos, never
+# this repo's tag. `main` is a hint, not a constraint — a repo whose default
+# branch is `master` (or anything else) is cloned at its HEAD instead, so no
+# component repo has to be renamed or tagged to keep a release working.
 API_REPO     ?= https://github.com/FloMorphic/morph-api.git
 API_REF      ?= main
 WAPP_REPO    ?= https://github.com/FloMorphic/morph-wapp.git

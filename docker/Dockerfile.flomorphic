@@ -46,7 +46,13 @@ ARG GOPROXY
 # to the C99 names makes those lines legal self-typedefs; on glibc it is a no-op.
 ARG MUSL_CFLAGS="-Du_int8_t=uint8_t -Du_int16_t=uint16_t -Du_int64_t=uint64_t"
 RUN apk add --no-cache git make build-base
-RUN git clone --depth 1 -b "$API_REF" "$API_REPO" /src/api
+# The version tag on getting-started names the IMAGE; the component repos are
+# tracked at their default branch and are not expected to carry a matching tag.
+# That branch is `main` in one repo and `master` in the next, so a ref the remote
+# does not have falls back to its HEAD rather than failing the build. Same in the
+# two clones below, and in entrypoint.sh for the self-building image.
+RUN git clone --depth 1 -b "$API_REF" "$API_REPO" /src/api \
+ || { rm -rf /src/api; git clone --depth 1 "$API_REPO" /src/api; }
 WORKDIR /src/api
 # Through the Makefile: it owns the cgo flags for the vendored sqlite header.
 # Passing CGO_CFLAGS here overrides that assignment, so the include is restated.
@@ -59,7 +65,8 @@ ARG PLUGINS_REPO
 ARG PLUGINS_REF
 ARG GOPROXY
 RUN apk add --no-cache git
-RUN git clone --depth 1 -b "$PLUGINS_REF" "$PLUGINS_REPO" /src/plugins
+RUN git clone --depth 1 -b "$PLUGINS_REF" "$PLUGINS_REPO" /src/plugins \
+ || { rm -rf /src/plugins; git clone --depth 1 "$PLUGINS_REPO" /src/plugins; }
 # Every top-level folder with a go.mod is a plugin binary — so a plugin added to
 # the repo is picked up here with no change to this file.
 RUN mkdir -p /out/bin && cd /src/plugins && \
@@ -79,7 +86,8 @@ ARG WAPP_REF
 # is not tied to any host name. See docker/nginx.conf.tmpl.
 ARG VITE_API_BASE_URL=/api
 RUN apk add --no-cache git && npm install -g pnpm@10
-RUN git clone --depth 1 -b "$WAPP_REF" "$WAPP_REPO" /src/wapp
+RUN git clone --depth 1 -b "$WAPP_REF" "$WAPP_REPO" /src/wapp \
+ || { rm -rf /src/wapp; git clone --depth 1 "$WAPP_REPO" /src/wapp; }
 WORKDIR /src/wapp
 RUN pnpm install --frozen-lockfile
 RUN VITE_API_BASE_URL="$VITE_API_BASE_URL" pnpm build
