@@ -36,9 +36,13 @@ set -eu
 # Escape hatch: `docker run … sh` / `… /bin/sh -c '…'` for debugging.
 if [ "$#" -gt 0 ]; then exec "$@"; fi
 
+# All three write to stdout on purpose. Docker merges the two streams into one
+# log with no ordering guarantee between them, so sending warnings to stderr
+# makes them surface out of sequence — a "skipping plugin nodes" warning landing
+# after "FloMorphic is up" reads as if it happened later, when it happened first.
 log()  { printf '[flomorphic] %s\n' "$*"; }
-warn() { printf '[flomorphic] ! %s\n' "$*" >&2; }
-die()  { printf '[flomorphic] error: %s\n' "$*" >&2; exit 1; }
+warn() { printf '[flomorphic] ! %s\n' "$*"; }
+die()  { printf '[flomorphic] error: %s\n' "$*"; exit 1; }
 
 # ── defaults ──────────────────────────────────────────────────────────────────
 : "${FLOMORPHIC_PREBUILT:=0}"     # 1 in the baked image: skip clone + compile
@@ -66,6 +70,12 @@ die()  { printf '[flomorphic] error: %s\n' "$*" >&2; exit 1; }
 
 : "${INFLOW_INFRA_API:=}"
 : "${DB_SOURCE:=/data/flomorphic.db}"
+# sqlite-vec's amalgamation contains, for every non-Windows/wasm target:
+#   typedef u_int8_t uint8_t;  (and u_int16_t / u_int64_t)
+# `u_int*_t` is a BSD/glibc spelling that musl does not define, so on Alpine the
+# typedefs collapse to implicit int and the file fails to compile. Mapping them
+# to the C99 names makes those lines legal self-typedefs; on glibc it is a no-op.
+: "${MUSL_CFLAGS:=-Du_int8_t=uint8_t -Du_int16_t=uint16_t -Du_int64_t=uint64_t}"
 export PORT DB_SOURCE
 
 # ── child process bookkeeping ─────────────────────────────────────────────────
@@ -139,29 +149,45 @@ sign_jwt() {
 
 # ── 1. build phase ────────────────────────────────────────────────────────────
 build_api() {
-    git_sync "$API_REPO" "$API_REF" "$SRC_DIR/api"
+    git_sync "$API_REPO" "$API_REF" "$SRC_DIR/api" || return 1
     log "building flomorphic-api for $(go env GOOS)/$(go env GOARCH) (cgo: sqlite + sqlite-vec)"
-    # The Makefile owns the cgo flags for the vendored sqlite header, so build
-    # through it rather than restating them here.
-    ( cd "$SRC_DIR/api" && make build BINARY="$APP_DIR/flomorphic-api" )
+    log "go module proxy: $(go env GOPROXY)"
+    # The Makefile owns the cgo flags for the vendored sqlite header; passing
+    # CGO_CFLAGS on the command line overrides that, so the include is restated
+    # alongside $MUSL_CFLAGS.
+    ( cd "$SRC_DIR/api" && make build BINARY="$APP_DIR/flomorphic-api" \
+        CGO_CFLAGS="-I$SRC_DIR/api/repository/sqlite/cdeps $MUSL_CFLAGS" ) || return 1
 }
 
 build_wapp() {
-    git_sync "$WAPP_REPO" "$WAPP_REF" "$SRC_DIR/wapp"
+    git_sync "$WAPP_REPO" "$WAPP_REF" "$SRC_DIR/wapp" || return 1
     log "installing canvas dependencies"
-    ( cd "$SRC_DIR/wapp" && pnpm install --frozen-lockfile --store-dir "$SRC_DIR/.pnpm-store" )
+    ( cd "$SRC_DIR/wapp" && pnpm install --frozen-lockfile --store-dir "$SRC_DIR/.pnpm-store" ) || return 1
     log "building the canvas (VITE_API_BASE_URL=$VITE_API_BASE_URL)"
-    ( cd "$SRC_DIR/wapp" && VITE_API_BASE_URL="$VITE_API_BASE_URL" pnpm build )
+    ( cd "$SRC_DIR/wapp" && VITE_API_BASE_URL="$VITE_API_BASE_URL" pnpm build ) || return 1
     rm -rf "$WEB_ROOT"
     ln -s "$SRC_DIR/wapp/dist" "$WEB_ROOT"
+}
+
+# A Go build that dies on "403 Forbidden" is not a broken source tree: the
+# default module proxy redirects zips to storage.googleapis.com, which some
+# networks block outright. Say so where it happens, rather than leaving a bare
+# stack trace in the logs.
+goproxy_hint() {
+    warn "if the failure was a 403 while downloading Go modules, this network blocks"
+    warn "the default module CDN. Set a mirror in flomorphic/.env and recreate:"
+    warn "  GOPROXY=https://goproxy.cn,direct"
 }
 
 if is_true "$FLOMORPHIC_PREBUILT"; then
     log "prebuilt image — skipping clone + compile"
 else
     mkdir -p "$SRC_DIR" "$APP_DIR"
-    build_api
-    build_wapp
+    if ! build_api; then
+        goproxy_hint
+        die "could not build flomorphic-api"
+    fi
+    build_wapp || die "could not build the canvas"
 fi
 
 [ -x "$APP_DIR/flomorphic-api" ] || die "no flomorphic-api binary at $APP_DIR/flomorphic-api"

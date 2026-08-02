@@ -5,7 +5,8 @@ already run, how the same artifact scales from a laptop to a cluster, and why th
 installed stack ships as a single container.
 
 **See also:** [Concepts](./concepts.md) · [Node palette](./nodes.md) ·
-[AI harness](./ai-harness.md) · [back to README](../README.md)
+[AI harness](./ai-harness.md) · [Developing from source](./development.md) ·
+[back to README](../README.md)
 
 ---
 

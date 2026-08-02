@@ -20,7 +20,11 @@
 # the pnpm store live there, so restarts are quick. Want a fast first start
 # instead? Build Dockerfile.flomorphic, which bakes all of it at image time.
 #
-# Publish (from a clone of this repo — the build context is just ./docker):
+# This is the channel published as :latest — see the Makefile, which builds it
+# per arch and merges the manifests:
+#   make release                       # :$(git describe) + :latest
+#   make build                         # host arch only, as flomorphic:local
+# By hand, from a clone of this repo (the context supplies ./docker):
 #   docker buildx build --platform linux/amd64,linux/arm64 \
 #     -f docker/Dockerfile.flomorphic-src \
 #     -t mehdishokohi/flomorphic:latest --push .
@@ -38,14 +42,35 @@ RUN apk add --no-cache \
  && npm install -g pnpm@10 \
  && npm cache clean --force
 
+# Go module proxy. Overridable because the default CDN is not reachable
+# everywhere: proxy.golang.org redirects module zips to storage.googleapis.com,
+# and networks that block it answer 403 mid-download. A mirror fixes it —
+# `docker run -e GOPROXY=https://goproxy.cn,direct …`, or GOPROXY in
+# flomorphic/.env. This image compiles at container START, so the value has to
+# be settable at run time, not only at build time.
+ARG GOPROXY="https://proxy.golang.org,direct"
+
+# What this image clones and compiles at container start. They stay ENV, so
+# `docker run -e API_REF=…` (or the compose file) still wins at run time — the
+# ARGs only set the DEFAULT baked into a given image, which is what makes a
+# published :vX.Y.Z tag mean something: without them every version of this
+# self-building image would compile `main` whenever it happened to start.
+ARG API_REPO=https://github.com/FloMorphic/morph-api.git
+ARG API_REF=main
+ARG WAPP_REPO=https://github.com/FloMorphic/morph-wapp.git
+ARG WAPP_REF=main
+ARG PLUGINS_REPO=https://github.com/FloMorphic/builtin-plugins.git
+ARG PLUGINS_REF=main
+
 # GOMODCACHE/GOCACHE point at /src so the module cache and build cache land on
 # the same persisted volume as the checkout — that is what makes restarts quick.
-ENV API_REPO=https://github.com/FloMorphic/morph-api.git \
-    API_REF=main \
-    WAPP_REPO=https://github.com/FloMorphic/morph-wapp.git \
-    WAPP_REF=main \
-    PLUGINS_REPO=https://github.com/FloMorphic/builtin-plugins.git \
-    PLUGINS_REF=main \
+ENV GOPROXY=${GOPROXY} \
+    API_REPO=${API_REPO} \
+    API_REF=${API_REF} \
+    WAPP_REPO=${WAPP_REPO} \
+    WAPP_REF=${WAPP_REF} \
+    PLUGINS_REPO=${PLUGINS_REPO} \
+    PLUGINS_REF=${PLUGINS_REF} \
     PLUGINS_ENABLED=1 \
     SRC_DIR=/src \
     APP_DIR=/app \

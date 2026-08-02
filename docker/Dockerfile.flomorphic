@@ -10,7 +10,11 @@
 # every architecture. This one is what `install.sh --build` produces locally and
 # what CI should publish per-arch.
 #
-# Build (context is this repo — it supplies docker/entrypoint.sh + nginx.conf):
+# Build (context is this repo — it supplies docker/entrypoint.sh + nginx.conf).
+# The Makefile drives both, and publishes this one on the -baked tags:
+#   make build-baked                   # host arch, as flomorphic:local-baked
+#   make release-baked                 # :$(git describe)-baked + :baked
+# By hand:
 #   docker build -f docker/Dockerfile.flomorphic -t flomorphic:local .
 #   docker buildx build --platform linux/amd64,linux/arm64 \
 #     -f docker/Dockerfile.flomorphic -t mehdishokohi/flomorphic:latest --push .
@@ -24,20 +28,36 @@ ARG WAPP_REF=main
 ARG PLUGINS_REPO=https://github.com/FloMorphic/builtin-plugins.git
 ARG PLUGINS_REF=main
 
+# Go module proxy, overridable because the default CDN is not reachable
+# everywhere: proxy.golang.org redirects module zips to storage.googleapis.com,
+# and networks that block it answer 403 mid-download. Point it at a mirror then:
+#   docker build --build-arg GOPROXY=https://goproxy.cn,direct …
+ARG GOPROXY="https://proxy.golang.org,direct"
+
 # ── the API (cgo: sqlite + sqlite-vec) ────────────────────────────────────────
 FROM golang:1.26-alpine AS api-build
 ARG API_REPO
 ARG API_REF
+ARG GOPROXY
+# sqlite-vec's amalgamation contains, for every non-Windows/wasm target:
+#   typedef u_int8_t uint8_t;  (and u_int16_t / u_int64_t)
+# `u_int*_t` is a BSD/glibc spelling that musl does not define, so on Alpine the
+# typedefs collapse to implicit int and the file fails to compile. Mapping them
+# to the C99 names makes those lines legal self-typedefs; on glibc it is a no-op.
+ARG MUSL_CFLAGS="-Du_int8_t=uint8_t -Du_int16_t=uint16_t -Du_int64_t=uint64_t"
 RUN apk add --no-cache git make build-base
 RUN git clone --depth 1 -b "$API_REF" "$API_REPO" /src/api
 WORKDIR /src/api
 # Through the Makefile: it owns the cgo flags for the vendored sqlite header.
-RUN make build BINARY=/out/flomorphic-api
+# Passing CGO_CFLAGS here overrides that assignment, so the include is restated.
+RUN make build BINARY=/out/flomorphic-api \
+      CGO_CFLAGS="-I/src/api/repository/sqlite/cdeps $MUSL_CFLAGS"
 
 # ── the builtin plugin nodes (pure Go, one binary per folder) ─────────────────
 FROM golang:1.26-alpine AS plugins-build
 ARG PLUGINS_REPO
 ARG PLUGINS_REF
+ARG GOPROXY
 RUN apk add --no-cache git
 RUN git clone --depth 1 -b "$PLUGINS_REF" "$PLUGINS_REPO" /src/plugins
 # Every top-level folder with a go.mod is a plugin binary — so a plugin added to
@@ -85,7 +105,11 @@ RUN chmod +x /usr/local/bin/entrypoint.sh && mkdir -p /data /src
 
 ARG PLUGINS_REPO
 ARG PLUGINS_REF
-ENV FLOMORPHIC_PREBUILT=1 \
+ARG GOPROXY
+# Carried into the container so a runtime plugin rebuild (a changed PLUGINS_REF)
+# uses the same reachable proxy the image was built with.
+ENV GOPROXY=${GOPROXY} \
+    FLOMORPHIC_PREBUILT=1 \
     PLUGINS_REPO=${PLUGINS_REPO} \
     PLUGINS_REF=${PLUGINS_REF} \
     PLUGINS_ENABLED=1 \

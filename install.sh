@@ -39,6 +39,9 @@
 #   PLUGINS_REPO        plugin repo cloned by the container  (default: FloMorphic/builtin-plugins)
 #   PLUGINS_REF         branch/tag for it                    (default: main)
 #   API_REF / WAPP_REF  branch/tag the image builds at start (default: main)
+#   GOPROXY             Go module proxy for those compiles  (default: image default)
+#                       Set a mirror where the default CDN is blocked, e.g.
+#                       GOPROXY=https://goproxy.cn,direct — see below.
 #   REPO_RAW / REPO_REF raw base URL + ref the compose file is fetched from
 #   REPO_GIT            git URL cloned for `--build`
 #   PLATFORM_INSTALLER  URL of the Inflowenger platform installer
@@ -68,6 +71,9 @@ PLUGINS_REPO="${PLUGINS_REPO:-https://github.com/FloMorphic/builtin-plugins.git}
 PLUGINS_REF="${PLUGINS_REF:-main}"
 API_REF="${API_REF:-main}"
 WAPP_REF="${WAPP_REF:-main}"
+# Inherited from the caller's shell when set, so a machine already configured for
+# a Go mirror needs nothing extra here. Empty = whatever the image defaults to.
+GOPROXY="${GOPROXY:-}"
 REPO_RAW="${REPO_RAW:-https://raw.githubusercontent.com/FloMorphic/getting-started}"
 REPO_REF="${REPO_REF:-main}"
 REPO_GIT="${REPO_GIT:-https://github.com/FloMorphic/getting-started.git}"
@@ -333,6 +339,7 @@ fi
   printf 'PLUGINS_REPO=%s\n'            "$PLUGINS_REPO"
   printf 'PLUGINS_REF=%s\n'             "$PLUGINS_REF"
   printf 'PLUGINS=\n'
+  printf 'GOPROXY=%s\n'                 "$GOPROXY"
 } > "$FLOMORPHIC_DIR/flomorphic/.env"
 chmod 600 "$FLOMORPHIC_DIR/flomorphic/.env"
 ok "flomorphic/docker-compose.yml + .env written"
@@ -370,14 +377,21 @@ if [ "$IMAGE_MODE" = build ]; then
     fi
   fi
   info "this compiles the API (cgo), the canvas and every plugin — expect a few minutes."
-  docker build \
+  # GOPROXY only when the caller set one, so the image default stands otherwise.
+  set -- \
     -f "$BUILD_CTX/docker/Dockerfile.flomorphic" \
     --build-arg "API_REF=$API_REF" \
     --build-arg "WAPP_REF=$WAPP_REF" \
     --build-arg "PLUGINS_REPO=$PLUGINS_REPO" \
-    --build-arg "PLUGINS_REF=$PLUGINS_REF" \
-    -t "$FLOMORPHIC_IMAGE" \
-    "$BUILD_CTX" || die "docker build failed."
+    --build-arg "PLUGINS_REF=$PLUGINS_REF"
+  [ -n "$GOPROXY" ] && set -- "$@" --build-arg "GOPROXY=$GOPROXY"
+  if ! docker build "$@" -t "$FLOMORPHIC_IMAGE" "$BUILD_CTX"; then
+    printf '\n'
+    warn "if it failed with a 403 while downloading Go modules, the default module"
+    warn "CDN (storage.googleapis.com) is blocked on this network. Retry with a mirror:"
+    info "  GOPROXY=https://goproxy.cn,direct $0 --build"
+    die "docker build failed."
+  fi
   ok "built $FLOMORPHIC_IMAGE"
 fi
 

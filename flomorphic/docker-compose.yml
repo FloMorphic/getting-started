@@ -58,6 +58,13 @@ services:
       # the branch or tag. Ignored by a baked image (install.sh --build).
       API_REF: ${API_REF:-main}
       WAPP_REF: ${WAPP_REF:-main}
+      # Go module proxy for those compiles (and for a runtime plugin rebuild).
+      # This is the value the container sees, so empty means Go's own default
+      # (proxy.golang.org) — set a mirror where that CDN is unreachable, since
+      # proxy.golang.org redirects module zips to storage.googleapis.com and a
+      # network that blocks it answers 403 mid-download:
+      #   GOPROXY=https://goproxy.cn,direct
+      GOPROXY: ${GOPROXY:-}
     volumes:
       # SQLite database (workflows, contexts, prompts, human tasks, vectors).
       # Without this, every restart starts from an empty canvas.

@@ -78,16 +78,20 @@ thing*. This repository is the entry point:
 - **One install path** — [`install.sh`](./install.sh) stands up the whole stack
   (Inflowenger platform + FloMorphic API + web app + builtin plugin nodes) instead
   of five separate setups.
-- **Developer tools** — the helpers you need when you want to change FloMorphic
-  rather than only use it: local wiring, plugin scaffolding, resets, smoke checks.
+- **Developer tools** — what you need when you want to change FloMorphic rather
+  than only use it. The local wiring is documented today
+  ([Developing from source](./docs/development.md)); plugin scaffolding, resets
+  and smoke checks are being assembled.
 - **A documentation map** — [`docs/`](./docs/) explains the model, and the
   [documentation map](#documentation) below points at whichever layer answers your
   question.
 
-> **Status.** The concept, the map and the install path are current: `install.sh`
-> and the compose stack are here. The developer tooling (plugin scaffolding,
-> resets, an end-to-end smoke check) is still being assembled; until it lands, each
-> component's own README is the source of truth for it.
+> **Status.** The concept, the map, the install path and the from-source
+> developer guide are current: `install.sh`, the compose stack and
+> [docs/development.md](./docs/development.md) are here. The developer *tooling*
+> (plugin scaffolding, resets, an end-to-end smoke check) is still being
+> assembled; until it lands, the guide plus each component's own README are the
+> source of truth.
 
 ---
 
@@ -138,25 +142,48 @@ and how to run your own plugin set — is in
 
 ### Running from source
 
+To *change* FloMorphic rather than only run it, take the container apart: the
+platform stays installed, and you run the product layer from your own checkouts.
+
 ```bash
-# 1. Platform (Infra + Fractal) — see Inflowenger/getting-started
+# 1. Platform (Infra + Fractal) — installed containers, left running
 curl -fsSL https://raw.githubusercontent.com/Inflowenger/getting-started/main/install.sh | bash
 
-# 2. FloMorphic API   (Go 1.26+, cgo)
-cd flomorphic-api && cp .env.example .env && make run       # :8025
+# 2. FloMorphic API   (Go 1.26+, cgo)                        → :8025
+git clone https://github.com/FloMorphic/morph-api.git && cd morph-api
+cp .env.example .env      # INFLOW_INFRA_API=http://localhost:8022
+make run                  # INFLOW_INFRA_JWT_SECRET=<the platform's API Secret Key>
 
-# 3. FloMorphic canvas
-cd flomorphic-wapp && pnpm install && cp .env.example .env  # VITE_API_BASE_URL=http://localhost:8025
+# 3. FloMorphic canvas                                       → :5173
+git clone https://github.com/FloMorphic/morph-wapp.git && cd morph-wapp
+pnpm install && cp .env.example .env    # VITE_API_BASE_URL=http://localhost:8025
 pnpm dev
 
-# 4. Builtin plugin nodes
-cd builtin-plugins/llm && go build -o bin/llm . && ./bin/llm
-cd builtin-plugins/mcp && go build -o bin/mcp . && ./bin/mcp
+# 4. Builtin plugin nodes — each needs a credential the API mints, in .env.morph
+git clone https://github.com/FloMorphic/builtin-plugins.git
+cd builtin-plugins/llm && go run .
+cd builtin-plugins/mcp && go run .
 ```
 
-The API's inflow runtime is **optional**: leave `INFLOW_INFRA_API` unset and it
-runs CRUD-only, which is enough to design and save workflows. Set it, and `Run`
-goes live.
+**Two variables bind all of it to the runtime you already have installed:**
+`INFLOW_INFRA_API` (Infra's REST base — the NATS endpoint is derived from its
+host) and `INFLOW_INFRA_JWT_SECRET` (the platform's API Secret Key). Anything you
+start from source joins the same live platform the moment those two are right.
+The runtime is also **optional**: leave `INFLOW_INFRA_API` unset and the API runs
+CRUD-only, which is enough to design and save workflows. Set it, and `Run` goes
+live.
+
+→ **[Developing from source](./docs/development.md)** — the full guide: where to
+find the secret, minting a plugin credential by hand, running one piece from
+source against the installed container, debugger configs, and what each failure
+mode actually means.
+
+> **A Go build that dies on `403 Forbidden`** is a network problem, not a broken
+> checkout: `proxy.golang.org` redirects module zips to `storage.googleapis.com`,
+> which some networks block. Point Go at a mirror and it goes away — from source
+> `export GOPROXY=https://goproxy.cn,direct`, for the installed stack `GOPROXY=` in
+> `flomorphic/.env` (the container compiles on start), and for an image build
+> `--build-arg GOPROXY=https://goproxy.cn,direct`.
 
 | Service | From source | Installed |
 | --- | --- | --- |
@@ -171,9 +198,10 @@ goes live.
 
 ### Still on the roadmap
 
-- [ ] **Developer tools** — local dev wiring (API + Vite + plugins against a running
-      platform), plugin scaffolding, database/context resets, and a smoke check that
-      runs a known flow end to end.
+- [x] **Local dev wiring** — API + Vite + plugin nodes against a running platform,
+      documented in [Developing from source](./docs/development.md).
+- [ ] **Developer tools** — scripts for that wiring, plugin scaffolding,
+      database/context resets, and a smoke check that runs a known flow end to end.
 - [ ] **Layered docs** — a walkthrough per layer: *use it* → *extend it with a
       plugin* → *build your own product on the runtime*.
 
@@ -189,6 +217,7 @@ goes live.
 | [docs/nodes.md](./docs/nodes.md) | FloMorphic's thirteen canvas nodes, what each lowers to, and the entities around the canvas. |
 | [docs/ai-harness.md](./docs/ai-harness.md) | Virtual functions, context, memory stores, out-of-model reasoning — and how RAG, agent loops, tool use and guardrails map onto them. |
 | [docs/architecture.md](./docs/architecture.md) | Process topology, attaching a system you already run, scaling out, and the container design. |
+| [docs/development.md](./docs/development.md) | Running the API, the canvas and the plugin nodes from source against an installed platform — the two variables that bind them, credentials, debugger configs, failure modes. |
 
 **In the component repositories** — which layer answers your question:
 
