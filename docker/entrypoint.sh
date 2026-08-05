@@ -70,6 +70,9 @@ die()  { printf '[flomorphic] error: %s\n' "$*"; exit 1; }
 
 : "${INFLOW_INFRA_API:=}"
 : "${DB_SOURCE:=/data/flomorphic.db}"
+# Go module proxy fallback for a blocked default CDN — see ensure_goproxy. Only
+# used when GOPROXY is empty AND the default proves unreachable from here.
+: "${GOPROXY_MIRROR:=https://goproxy.cn,direct}"
 # sqlite-vec's amalgamation contains, for every non-Windows/wasm target:
 #   typedef u_int8_t uint8_t;  (and u_int16_t / u_int64_t)
 # `u_int*_t` is a BSD/glibc spelling that musl does not define, so on Alpine the
@@ -196,8 +199,40 @@ build_wapp() {
 goproxy_hint() {
     warn "if the failure was a 403 while downloading Go modules, this network blocks"
     warn "the default module CDN. Set a mirror in flomorphic/.env and recreate:"
-    warn "  GOPROXY=https://goproxy.cn,direct"
+    warn "  GOPROXY=$GOPROXY_MIRROR"
 }
+
+# Pick a working Go module proxy BEFORE anything is compiled. install.sh cannot do
+# this reliably: it runs on the host, but every Go build here runs in THIS
+# container, whose egress can differ from the host's — the default proxy redirects
+# module zips to storage.googleapis.com, and a host that reaches it does not prove
+# this container can (the common case is exactly the reverse). So probe from here,
+# the way the build fetches (a real module zip, redirect followed), and fall back
+# to a mirror on failure. An explicit GOPROXY is always respected, never probed.
+ensure_goproxy() {
+    if [ -n "${GOPROXY:-}" ]; then
+        log "go module proxy (set by the operator): $GOPROXY"
+        return 0
+    fi
+    command -v go >/dev/null 2>&1 || return 0   # nothing here will compile
+    _probe='https://proxy.golang.org/github.com/klauspost/compress/@v/v1.18.5.zip'
+    # -r 0-0 keeps it to a single byte; -L follows to storage.googleapis.com,
+    # which is the host that actually 403s on a blocked network.
+    if curl -fsSL -m 20 -r 0-0 -o /dev/null "$_probe" 2>/dev/null; then
+        log "go module proxy: default (proxy.golang.org) reachable from this container"
+    else
+        export GOPROXY="$GOPROXY_MIRROR"
+        warn "the default Go module CDN is unreachable from this container — it blocks"
+        warn "proxy.golang.org / storage.googleapis.com and the build would 403 mid-download."
+        warn "Falling back to a mirror so the build succeeds: GOPROXY=$GOPROXY"
+        warn "Pin GOPROXY in flomorphic/.env to choose a different one."
+    fi
+}
+
+# Runs even for the prebuilt image: it ships plugin binaries, but a changed
+# PLUGINS_REPO/PLUGINS_REF still triggers a Go build at start (see
+# ensure_plugin_binaries), which needs a reachable proxy just the same.
+ensure_goproxy
 
 if is_true "$FLOMORPHIC_PREBUILT"; then
     log "prebuilt image — skipping clone + compile"

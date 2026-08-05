@@ -74,7 +74,10 @@ PLUGINS_REF="${PLUGINS_REF:-main}"
 API_REF="${API_REF:-main}"
 WAPP_REF="${WAPP_REF:-main}"
 # Inherited from the caller's shell when set, so a machine already configured for
-# a Go mirror needs nothing extra here. Empty = whatever the image defaults to.
+# a Go mirror needs nothing extra here. Left empty, the container itself probes the
+# default Go proxy at start and falls back to a mirror if this network blocks it
+# (see docker/entrypoint.sh:ensure_goproxy) — detection must run where the build
+# does, since the container's egress can differ from this host's.
 GOPROXY="${GOPROXY:-}"
 REPO_RAW="${REPO_RAW:-https://raw.githubusercontent.com/FloMorphic/getting-started}"
 REPO_REF="${REPO_REF:-main}"
