@@ -1,1 +1,12 @@
 __*
+
+# Local per-install stack config — holds the platform's API secret. Never commit.
+.env
+**/.env
+!**/.env.example
+.env.bak
+**/.env.bak
+
+# Local runtime state (SQLite db, vectors, human tasks, plugin sources)
+flomorphic/data/
+platform/
