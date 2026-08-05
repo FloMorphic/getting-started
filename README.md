@@ -101,7 +101,7 @@ thing*. This repository is the entry point:
 curl -fsSL https://raw.githubusercontent.com/FloMorphic/getting-started/main/install.sh | bash
 ```
 
-Docker and the Compose v2 plugin are the only prerequisites. The script asks five
+Docker and the Compose v2 plugin are the only prerequisites. The script asks four
 things and does the rest:
 
 | It asks | Because |
@@ -109,8 +109,11 @@ things and does the rest:
 | **Install directory** | where the compose stacks and the database land |
 | **Platform: the one already running, or a new one?** | FloMorphic is a product *on* the Inflowenger runtime. A new platform is installed by [the Inflowenger installer](https://github.com/Inflowenger/getting-started) itself — one source of truth, not a copy |
 | **Image: pull, or build from source?** | pull the published image, or `--build` a local one from the repos |
-| **Builtin plugin nodes (llm, mcp)?** | without them the LLM and MCP nodes have nothing to execute |
 | **Ports** | the canvas (`8090`) and the API (`8026`) |
+
+The builtin plugin nodes are not one of the questions: they are what the canvas's
+stock nodes run as, so the container always clones and builds them. `PLUGINS_ENABLED=0`
+is still there for a canvas + API with no platform behind it.
 
 Everything it asks can be set with an env var instead (`ASSUME_YES=1` for an
 unattended run) — see the header of [`install.sh`](./install.sh).

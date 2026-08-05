@@ -15,8 +15,7 @@
 #   2. platform: use the one that is already running, or install a new one
 #      (delegated to the Inflowenger installer, so there is one source of truth)
 #   3. image: pull the published FloMorphic image, or build one from source here
-#   4. builtin plugin nodes (llm, mcp, …): on or off
-#   5. ports
+#   4. ports
 #
 # It works both interactively (prompts read from /dev/tty even when piped through
 # curl) and non-interactively (drive it entirely with the env vars below).
@@ -36,6 +35,9 @@
 #   FLOMORPHIC_PORT     host port for the canvas             (default: 8090)
 #   FLOMORPHIC_API_PORT host port for the API                (default: 8026)
 #   PLUGINS_ENABLED     1/0 — run the builtin plugin nodes   (default: 1)
+#                       Not prompted for: the builtin nodes are part of the
+#                       product, not an add-on. 0 is an escape hatch for running
+#                       the canvas + API alone (see `make run`).
 #   PLUGINS_REPO        plugin repo cloned by the container  (default: FloMorphic/builtin-plugins)
 #   PLUGINS_REF         branch/tag for it                    (default: main)
 #   API_REF / WAPP_REF  branch/tag the image builds at start (default: main)
@@ -65,7 +67,7 @@ IMAGE_TAG="${IMAGE_TAG:-latest}"
 FLOMORPHIC_IMAGE="${FLOMORPHIC_IMAGE:-}"
 FLOMORPHIC_PORT="${FLOMORPHIC_PORT:-8090}"
 FLOMORPHIC_API_PORT="${FLOMORPHIC_API_PORT:-8026}"
-PLUGINS_ENABLED="${PLUGINS_ENABLED:-}"
+PLUGINS_ENABLED="${PLUGINS_ENABLED:-1}"
 AUTH_ENABLED="${AUTH_ENABLED:-false}"
 PLUGINS_REPO="${PLUGINS_REPO:-https://github.com/FloMorphic/builtin-plugins.git}"
 PLUGINS_REF="${PLUGINS_REF:-main}"
@@ -293,12 +295,13 @@ if have_tty && confirm "Set advanced options (source refs, ports)?" n; then
   FLOMORPHIC_API_PORT="$(ask "Host port for the API" "$FLOMORPHIC_API_PORT")"
 fi
 
-# ── 4. plugin nodes ───────────────────────────────────────────────────────────
-if [ -z "$PLUGINS_ENABLED" ]; then
-  info "The LLM and MCP nodes are ordinary inflow plugins. The container clones and"
-  info "runs them itself, credentialed by the API it just started."
-  if confirm "Run the builtin plugin nodes (llm, mcp)?" y; then PLUGINS_ENABLED=1; else PLUGINS_ENABLED=0; fi
-fi
+# The builtin plugin nodes are not asked about. They are what the canvas's stock
+# nodes RUN as — the container clones the repo, builds every plugin in it and
+# credentials them against the API it just started. Turning them off leaves a
+# canvas whose nodes cannot execute, which is not an install-time choice anyone
+# can make usefully; naming two of them in a prompt only asked the user to judge
+# components they have no way to evaluate yet. PLUGINS_ENABLED=0 remains for the
+# one case that wants it — canvas + API with no platform, as in `make run`.
 
 # ── write the stack ───────────────────────────────────────────────────────────
 step "Writing the FloMorphic stack -> $FLOMORPHIC_DIR/flomorphic"
@@ -435,10 +438,13 @@ step "Done"
 printf '\n%s  FloMorphic%s\n' "$B" "$RST"
 info "Canvas               http://localhost:$FLOMORPHIC_PORT"
 info "API (direct)         http://localhost:$FLOMORPHIC_API_PORT   ${DIM}(the canvas uses /api behind the canvas port)${RST}"
+# Deliberately not a list: the image builds whatever plugin the repo carries (any
+# top-level folder with a go.mod), so a name spelled out here goes stale the next
+# time one is added.
 if [ "$PLUGINS_ENABLED" = "1" ]; then
-  info "Plugin nodes         llm, mcp — started inside the container, credentialed by the API"
+  info "Plugin nodes         built from $PLUGINS_REPO@$PLUGINS_REF, started inside the container"
 else
-  info "Plugin nodes         disabled (PLUGINS_ENABLED=0)"
+  info "Plugin nodes         disabled (PLUGINS_ENABLED=0) — the canvas's nodes will not execute"
 fi
 
 printf '\n%s  Platform%s\n' "$B" "$RST"
