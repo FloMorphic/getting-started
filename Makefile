@@ -112,6 +112,7 @@ BUILD_ARGS := \
 	docker-push-amd64 docker-push-arm64 docker-push push-latest release \
 	baked-amd64 baked-arm64 baked \
 	baked-push-amd64 baked-push-arm64 baked-push push-baked release-baked \
+	release-baked-latest \
 	tag inspect clean
 
 help: ## Show this help
@@ -267,6 +268,20 @@ push-baked: baked-push
 release-baked: push-baked ## Publish VERSION-baked + baked (multi-arch)
 	@printf '\npublished %s:%s-baked and %s:baked\n' \
 	  "$(IMAGE_NAME)" "$(VERSION)" "$(IMAGE_NAME)"
+
+# The baked image is the fast-install default for everyone, so `latest` must BE
+# the baked image. This publishes it and, in the same run, repoints :latest and
+# :VERSION at that exact manifest — no rebuild, just manifest assembly from the
+# per-arch tags push-baked already pushed. One command, no separate retag step.
+release-baked-latest: push-baked ## Publish baked AND repoint :latest + :VERSION at it
+	docker buildx imagetools create \
+		-t $(IMAGE_NAME):latest \
+		-t $(IMAGE_NAME):$(VERSION) \
+		$(IMAGE_NAME):$(VERSION)-baked-amd64 \
+		$(IMAGE_NAME):$(VERSION)-baked-arm64
+	@printf '\npublished %s: :%s-baked :baked :%s :latest — all the baked hybrid (multi-arch)\n' \
+	  "$(IMAGE_NAME)" "$(VERSION)" "$(VERSION)"
+	@$(MAKE) --no-print-directory inspect
 
 # ── release plumbing ──────────────────────────────────────────────────────────
 
