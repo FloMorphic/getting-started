@@ -70,9 +70,16 @@ services:
       # Without this, every restart starts from an empty canvas.
       - ./data:/data
       # Checkout + Go module cache + pnpm store for the self-building image, so
-      # a restart is quick instead of a full re-clone and rebuild. Harmless
-      # (just plugin sources) with a baked image.
+      # a restart is quick instead of a full re-clone and rebuild. With the baked
+      # image it holds only the plugin sources + Go module cache the entrypoint
+      # uses to build the plugin nodes.
       - flomorphic-src:/src
+      # Built plugin-node binaries (+ a .ref stamp of PLUGINS_REPO@PLUGINS_REF).
+      # The baked image ships api + canvas but NOT the plugins, so the entrypoint
+      # compiles them at first start; persisting them here means that happens once
+      # per repo@ref instead of on every container recreate. Changing
+      # PLUGINS_REPO/PLUGINS_REF invalidates the stamp and triggers one rebuild.
+      - flomorphic-plugins:/app/plugins
     ports:
       # The canvas — and everything the browser needs, via nginx.
       - "${FLOMORPHIC_PORT:-8090}:80"
@@ -101,3 +108,4 @@ networks:
 
 volumes:
   flomorphic-src:
+  flomorphic-plugins:

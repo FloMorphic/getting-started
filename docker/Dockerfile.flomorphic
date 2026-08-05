@@ -1,14 +1,23 @@
 # syntax=docker/dockerfile:1
 #
-# Baked image for the whole FloMorphic stack: morph-api + morph-wapp + the
-# builtin plugin nodes, compiled at image-build time and served behind one nginx.
+# Baked image for the FloMorphic stack: morph-api + morph-wapp compiled at
+# image-build time, served behind one nginx. The builtin plugin nodes are NOT
+# baked — they are cloned and built by the entrypoint at first container start.
+#
+# Why the split: the api (cgo: sqlite + sqlite-vec) and the canvas (pnpm build)
+# are heavy and slow to compile, so baking them makes startup near-instant and
+# takes their build off the boot path entirely. The plugin nodes are small pure-Go
+# binaries and cheap to build, and leaving them to the entrypoint keeps the one
+# thing worth swapping at runtime swappable: point PLUGINS_REPO/PLUGINS_REF at
+# another repo or ref and the entrypoint rebuilds them in place, no new image.
+# Trade-off: the plugin build needs github + a Go proxy reachable at first start
+# (ensure_goproxy handles the mirror); persist /app/plugins on a volume to make it
+# build once per repo@ref instead of on every container recreate.
 #
 # Same runtime contract as Dockerfile.flomorphic-src (identical entrypoint, same
-# env vars, same ports) — the only difference is WHEN things compile. Here the
-# sources are cloned and built in the stages below, so the container starts in
-# seconds; there, everything is built at container start, so one image serves
-# every architecture. This one is what `install.sh --build` produces locally and
-# what CI should publish per-arch.
+# env vars, same ports) — the difference is WHEN things compile. There, api and
+# canvas build at container start too; here they are already baked. This one is
+# what `install.sh --build` produces locally and what CI should publish per-arch.
 #
 # Build (context is this repo — it supplies docker/entrypoint.sh + nginx.conf).
 # The Makefile drives both, and publishes this one on the -baked tags:
@@ -59,24 +68,10 @@ WORKDIR /src/api
 RUN make build BINARY=/out/flomorphic-api \
       CGO_CFLAGS="-I/src/api/repository/sqlite/cdeps $MUSL_CFLAGS"
 
-# ── the builtin plugin nodes (pure Go, one binary per folder) ─────────────────
-FROM golang:1.26-alpine AS plugins-build
-ARG PLUGINS_REPO
-ARG PLUGINS_REF
-ARG GOPROXY
-RUN apk add --no-cache git
-RUN git clone --depth 1 -b "$PLUGINS_REF" "$PLUGINS_REPO" /src/plugins \
- || { rm -rf /src/plugins; git clone --depth 1 "$PLUGINS_REPO" /src/plugins; }
-# Every top-level folder with a go.mod is a plugin binary — so a plugin added to
-# the repo is picked up here with no change to this file.
-RUN mkdir -p /out/bin && cd /src/plugins && \
-    for d in */; do \
-      [ -f "$d/go.mod" ] || continue; \
-      n="${d%/}"; \
-      echo "building plugin $n"; \
-      ( cd "$d" && CGO_ENABLED=0 go build -trimpath -o "/out/bin/$n" . ); \
-    done && \
-    printf '%s@%s' "$PLUGINS_REPO" "$PLUGINS_REF" > /out/bin/.ref
+# The builtin plugin nodes are intentionally NOT built here — the entrypoint
+# clones PLUGINS_REPO@PLUGINS_REF and compiles them at first container start (see
+# ensure_plugin_binaries), which keeps them swappable at runtime. The runtime
+# stage below therefore keeps the Go toolchain and git on purpose.
 
 # ── the canvas ────────────────────────────────────────────────────────────────
 FROM node:22-alpine AS wapp-build
@@ -101,7 +96,6 @@ FROM golang:1.26-alpine
 RUN apk add --no-cache git nginx curl jq openssl ca-certificates tzdata
 
 COPY --from=api-build     /out/flomorphic-api /app/flomorphic-api
-COPY --from=plugins-build /out/bin            /app/plugins
 COPY --from=wapp-build    /src/wapp/dist      /srv/www
 # The seed is the source of truth for the builtin nodes' PLUGIN_IDs; keep a copy
 # so the entrypoint can resolve them even if the API is not answering yet.
