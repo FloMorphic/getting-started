@@ -339,8 +339,6 @@ fi
   printf 'DB_SOURCE=/data/flomorphic.db\n'
   printf 'FLOMORPHIC_PORT=%s\n'         "$FLOMORPHIC_PORT"
   printf 'FLOMORPHIC_API_PORT=%s\n'     "$FLOMORPHIC_API_PORT"
-  printf 'API_REF=%s\n'                 "$API_REF"
-  printf 'WAPP_REF=%s\n'                "$WAPP_REF"
   printf 'PLUGINS_ENABLED=%s\n'         "$PLUGINS_ENABLED"
   printf 'PLUGINS_REPO=%s\n'            "$PLUGINS_REPO"
   printf 'PLUGINS_REF=%s\n'             "$PLUGINS_REF"
@@ -405,8 +403,9 @@ fi
 step "Starting FloMorphic"
 if [ "$IMAGE_MODE" = pull ]; then
   ( cd "$FLOMORPHIC_DIR/flomorphic" && $DC pull --quiet 2>/dev/null || true )
-  info "the published image is self-building: it clones and compiles the sources at"
-  info "container start, so the FIRST start takes a few minutes (later ones are quick)."
+  info "the published image is baked (api + canvas compiled in), so it starts fast."
+  info "the FIRST start builds the plugin nodes once, which takes a couple of minutes;"
+  info "later starts reuse them from a volume."
 fi
 if ! ( cd "$FLOMORPHIC_DIR/flomorphic" && $DC up -d ); then
   printf '\n'
@@ -432,7 +431,7 @@ done
 if [ "$ready" = "1" ]; then
   ok "FloMorphic is up"
 else
-  warn "not ready yet. That is normal on a first self-building start; follow it with:"
+  warn "not ready yet. That is normal on a first start (it builds the plugin nodes); follow it with:"
   info "  (cd $FLOMORPHIC_DIR/flomorphic && $DC logs -f)"
 fi
 

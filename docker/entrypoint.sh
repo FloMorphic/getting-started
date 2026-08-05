@@ -4,26 +4,21 @@
 # API (morph-api) and the builtin plugin nodes (builtin-plugins) in one process
 # tree, behind one nginx.
 #
-# The same script drives both images:
-#
-#   Dockerfile.flomorphic-src   nothing is compiled at image-build time. This
-#                               script clones morph-api + morph-wapp at container
-#                               START and builds them native to the CPU it is
-#                               actually running on, so one published manifest
-#                               serves amd64 and arm64 with no cross-compiling.
-#   Dockerfile.flomorphic       everything is compiled at image-build time and
-#                               FLOMORPHIC_PREBUILT=1 skips the build phase.
+# morph-api and the canvas are already compiled into the image (see
+# docker/Dockerfile.flomorphic); this script does not build them. The builtin
+# plugin nodes are the one exception — small pure-Go binaries it clones and builds
+# at first container start (cached on the /app/plugins volume), so PLUGINS_REF
+# stays swappable without a new image.
 #
 # Startup order matters, and it is why the plugins are bootstrapped from here
 # rather than from their own containers: a plugin needs a NATS credential on the
 # builtin-plugins account, and the thing that mints it is flomorphic-api itself
 # (POST /extension/plugin/cred). So the sequence is:
 #
-#   1. build (or skip)                2. nginx up
-#   3. flomorphic-api up              4. wait for its /health
-#   5. mint ONE multi-access credential — shared by every builtin plugin
-#   6. clone/build the plugin repo, resolve each plugin's PLUGIN_ID, run it
-#   7. supervise: if any child dies, tear the rest down and exit non-zero so the
+#   1. nginx up                       2. flomorphic-api up
+#   3. wait for its /health           4. mint ONE multi-access credential
+#   5. clone/build the plugin repo (once per repo@ref), resolve each PLUGIN_ID, run it
+#   6. supervise: if any child dies, tear the rest down and exit non-zero so the
 #      container restart policy gives a clean slate.
 #
 # Each plugin's PLUGIN_ID is *not* invented here: the builtin palette nodes carry
@@ -45,18 +40,11 @@ warn() { printf '[flomorphic] ! %s\n' "$*"; }
 die()  { printf '[flomorphic] error: %s\n' "$*"; exit 1; }
 
 # ── defaults ──────────────────────────────────────────────────────────────────
-: "${FLOMORPHIC_PREBUILT:=0}"     # 1 in the baked image: skip clone + compile
-: "${SRC_DIR:=/src}"              # checkout + build caches (persist on a volume)
+: "${SRC_DIR:=/src}"              # plugin checkout + Go module cache (a volume)
 : "${APP_DIR:=/app}"
-: "${WEB_ROOT:=/srv/www}"
+: "${WEB_ROOT:=/srv/www}"         # baked canvas
 : "${PORT:=8025}"                 # flomorphic-api, container-internal
 : "${WEB_PORT:=80}"               # nginx (canvas + /api + /ws)
-: "${VITE_API_BASE_URL:=/api}"    # relative on purpose — see nginx.conf.tmpl
-
-: "${API_REPO:=https://github.com/FloMorphic/morph-api.git}"
-: "${API_REF:=main}"
-: "${WAPP_REPO:=https://github.com/FloMorphic/morph-wapp.git}"
-: "${WAPP_REF:=main}"
 
 : "${PLUGINS_ENABLED:=1}"
 : "${PLUGINS_REPO:=https://github.com/FloMorphic/builtin-plugins.git}"
@@ -71,14 +59,10 @@ die()  { printf '[flomorphic] error: %s\n' "$*"; exit 1; }
 : "${INFLOW_INFRA_API:=}"
 : "${DB_SOURCE:=/data/flomorphic.db}"
 # Go module proxy fallback for a blocked default CDN — see ensure_goproxy. Only
-# used when GOPROXY is empty AND the default proves unreachable from here.
+# used when GOPROXY is empty AND the default proves unreachable from here. The
+# plugin nodes are the only thing compiled here (pure Go, CGO off), so the
+# sqlite/sqlite-vec cgo flags the API needs live in the Dockerfile, not here.
 : "${GOPROXY_MIRROR:=https://goproxy.cn,direct}"
-# sqlite-vec's amalgamation contains, for every non-Windows/wasm target:
-#   typedef u_int8_t uint8_t;  (and u_int16_t / u_int64_t)
-# `u_int*_t` is a BSD/glibc spelling that musl does not define, so on Alpine the
-# typedefs collapse to implicit int and the file fails to compile. Mapping them
-# to the C99 names makes those lines legal self-typedefs; on glibc it is a no-op.
-: "${MUSL_CFLAGS:=-Du_int8_t=uint8_t -Du_int16_t=uint16_t -Du_int64_t=uint64_t}"
 export PORT DB_SOURCE
 
 # ── child process bookkeeping ─────────────────────────────────────────────────
@@ -170,40 +154,9 @@ sign_jwt() {
     printf '%s.%s.%s' "$_h" "$_p" "$_s"
 }
 
-# ── 1. build phase ────────────────────────────────────────────────────────────
-build_api() {
-    git_sync "$API_REPO" "$API_REF" "$SRC_DIR/api" || return 1
-    log "building flomorphic-api for $(go env GOOS)/$(go env GOARCH) (cgo: sqlite + sqlite-vec)"
-    log "go module proxy: $(go env GOPROXY)"
-    # The Makefile owns the cgo flags for the vendored sqlite header; passing
-    # CGO_CFLAGS on the command line overrides that, so the include is restated
-    # alongside $MUSL_CFLAGS.
-    ( cd "$SRC_DIR/api" && make build BINARY="$APP_DIR/flomorphic-api" \
-        CGO_CFLAGS="-I$SRC_DIR/api/repository/sqlite/cdeps $MUSL_CFLAGS" ) || return 1
-}
-
-build_wapp() {
-    git_sync "$WAPP_REPO" "$WAPP_REF" "$SRC_DIR/wapp" || return 1
-    log "installing canvas dependencies"
-    ( cd "$SRC_DIR/wapp" && pnpm install --frozen-lockfile --store-dir "$SRC_DIR/.pnpm-store" ) || return 1
-    log "building the canvas (VITE_API_BASE_URL=$VITE_API_BASE_URL)"
-    ( cd "$SRC_DIR/wapp" && VITE_API_BASE_URL="$VITE_API_BASE_URL" pnpm build ) || return 1
-    rm -rf "$WEB_ROOT"
-    ln -s "$SRC_DIR/wapp/dist" "$WEB_ROOT"
-}
-
-# A Go build that dies on "403 Forbidden" is not a broken source tree: the
-# default module proxy redirects zips to storage.googleapis.com, which some
-# networks block outright. Say so where it happens, rather than leaving a bare
-# stack trace in the logs.
-goproxy_hint() {
-    warn "if the failure was a 403 while downloading Go modules, this network blocks"
-    warn "the default module CDN. Set a mirror in flomorphic/.env and recreate:"
-    warn "  GOPROXY=$GOPROXY_MIRROR"
-}
-
-# Pick a working Go module proxy BEFORE anything is compiled. install.sh cannot do
-# this reliably: it runs on the host, but every Go build here runs in THIS
+# ── 1. Go module proxy for the plugin build ───────────────────────────────────
+# Pick a working Go module proxy before the plugin nodes are compiled. install.sh
+# cannot do this reliably: it runs on the host, but the plugin build runs in THIS
 # container, whose egress can differ from the host's — the default proxy redirects
 # module zips to storage.googleapis.com, and a host that reaches it does not prove
 # this container can (the common case is exactly the reverse). So probe from here,
@@ -224,27 +177,14 @@ ensure_goproxy() {
         export GOPROXY="$GOPROXY_MIRROR"
         warn "the default Go module CDN is unreachable from this container — it blocks"
         warn "proxy.golang.org / storage.googleapis.com and the build would 403 mid-download."
-        warn "Falling back to a mirror so the build succeeds: GOPROXY=$GOPROXY"
+        warn "Falling back to a mirror so the plugin build succeeds: GOPROXY=$GOPROXY"
         warn "Pin GOPROXY in flomorphic/.env to choose a different one."
     fi
 }
 
-# Runs even for the prebuilt image: it ships plugin binaries, but a changed
-# PLUGINS_REPO/PLUGINS_REF still triggers a Go build at start (see
-# ensure_plugin_binaries), which needs a reachable proxy just the same.
 ensure_goproxy
 
-if is_true "$FLOMORPHIC_PREBUILT"; then
-    log "prebuilt image — skipping clone + compile"
-else
-    mkdir -p "$SRC_DIR" "$APP_DIR"
-    if ! build_api; then
-        goproxy_hint
-        die "could not build flomorphic-api"
-    fi
-    build_wapp || die "could not build the canvas"
-fi
-
+# api + canvas are baked into the image; only the plugin nodes are built here.
 [ -x "$APP_DIR/flomorphic-api" ] || die "no flomorphic-api binary at $APP_DIR/flomorphic-api"
 [ -e "$WEB_ROOT/index.html" ]    || die "no canvas build at $WEB_ROOT"
 

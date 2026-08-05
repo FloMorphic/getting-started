@@ -144,21 +144,18 @@ Two reasons, both structural rather than cosmetic:
 Point `PLUGINS_REPO` / `PLUGINS_REF` somewhere else to run your own set, or
 `PLUGINS_ENABLED=0` to run the canvas without any.
 
-### The two images
+### The image
 
-| | What it does | When |
-| --- | --- | --- |
-| **self-building** (published, the default) | ships only tooling and clones + compiles morph-api and morph-wapp at container **start**, native to your CPU | first start takes a few minutes and needs network; one manifest serves amd64 and arm64 |
-| **baked** (`install.sh --build`) | compiles everything at image-build time | starts in seconds; what CI publishes per-arch |
+One **baked** image, published and pulled by `install.sh`: morph-api and the
+canvas are compiled in at image-build time, so a container starts in seconds and
+needs no toolchain or network to serve. The builtin plugin nodes are the one
+exception — small pure-Go binaries the entrypoint clones and builds at **first
+container start** (cached on the `/app/plugins` volume), so `PLUGINS_REF` stays
+swappable without a new image. `/src` holds the plugin checkout and Go module
+cache so a later rebuild (a changed `PLUGINS_REF`) is quick. To build the whole
+image from source, `install.sh --build` or `make build`.
 
-Both are driven by the same entrypoint and the same env vars — only the moment of
-compilation differs. `/src` holds the checkout, the Go module cache and the pnpm
-store, so restarts skip the work. `API_REF` / `WAPP_REF` / `PLUGINS_REF` in
-`flomorphic/.env` pick the branch or tag each source is built from; pin release
-tags for reproducible restarts.
-
-Dockerfiles: [`docker/Dockerfile.flomorphic-src`](../docker/Dockerfile.flomorphic-src)
-(self-building) and [`docker/Dockerfile.flomorphic`](../docker/Dockerfile.flomorphic)
-(baked). Each component repo also carries its own Dockerfile — `flomorphic-api`
-(API + plugin nodes) and `flomorphic-wapp` (canvas + proxy) — for a split
-deployment or a CI pipeline that publishes them separately.
+Dockerfile: [`docker/Dockerfile.flomorphic`](../docker/Dockerfile.flomorphic).
+Each component repo also carries its own Dockerfile — `flomorphic-api` (API +
+plugin nodes) and `flomorphic-wapp` (canvas + proxy) — for a split deployment or
+a CI pipeline that publishes them separately.

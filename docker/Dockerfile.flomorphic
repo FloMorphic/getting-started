@@ -14,15 +14,14 @@
 # (ensure_goproxy handles the mirror); persist /app/plugins on a volume to make it
 # build once per repo@ref instead of on every container recreate.
 #
-# Same runtime contract as Dockerfile.flomorphic-src (identical entrypoint, same
-# env vars, same ports) — the difference is WHEN things compile. There, api and
-# canvas build at container start too; here they are already baked. This one is
-# what `install.sh --build` produces locally and what CI should publish per-arch.
+# This is the only image FloMorphic ships. It is what `install.sh` pulls, what
+# `install.sh --build` / `make build` produce locally, and what CI publishes
+# per-arch. To build from source, clone the component repos and `make build`.
 #
 # Build (context is this repo — it supplies docker/entrypoint.sh + nginx.conf).
-# The Makefile drives both, and publishes this one on the -baked tags:
-#   make build-baked                   # host arch, as flomorphic:local-baked
-#   make release-baked                 # :$(git describe)-baked + :baked
+# The Makefile drives it:
+#   make build                         # host arch, as flomorphic:local
+#   make release                       # multi-arch :$(git describe) + :latest
 # By hand:
 #   docker build -f docker/Dockerfile.flomorphic -t flomorphic:local .
 #   docker buildx build --platform linux/amd64,linux/arm64 \
@@ -58,8 +57,8 @@ RUN apk add --no-cache git make build-base
 # The version tag on getting-started names the IMAGE; the component repos are
 # tracked at their default branch and are not expected to carry a matching tag.
 # That branch is `main` in one repo and `master` in the next, so a ref the remote
-# does not have falls back to its HEAD rather than failing the build. Same in the
-# two clones below, and in entrypoint.sh for the self-building image.
+# does not have falls back to its HEAD rather than failing the build. Same for the
+# canvas clone below, and in entrypoint.sh when it builds the plugin nodes.
 RUN git clone --depth 1 -b "$API_REF" "$API_REPO" /src/api \
  || { rm -rf /src/api; git clone --depth 1 "$API_REPO" /src/api; }
 WORKDIR /src/api
@@ -111,7 +110,6 @@ ARG GOPROXY
 # Carried into the container so a runtime plugin rebuild (a changed PLUGINS_REF)
 # uses the same reachable proxy the image was built with.
 ENV GOPROXY=${GOPROXY} \
-    FLOMORPHIC_PREBUILT=1 \
     PLUGINS_REPO=${PLUGINS_REPO} \
     PLUGINS_REF=${PLUGINS_REF} \
     PLUGINS_ENABLED=1 \

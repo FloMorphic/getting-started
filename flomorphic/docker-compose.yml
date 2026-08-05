@@ -52,27 +52,19 @@ services:
       PLUGINS_REF: ${PLUGINS_REF:-main}
       # Comma-separated allow-list of folders to run; empty = every plugin found.
       PLUGINS: ${PLUGINS:-}
-
-      # ── source refs (self-building image only) ────────────────────────────
-      # The published image compiles its sources at container start; these pick
-      # the branch or tag. Ignored by a baked image (install.sh --build).
-      API_REF: ${API_REF:-main}
-      WAPP_REF: ${WAPP_REF:-main}
-      # Go module proxy for those compiles (and for a runtime plugin rebuild).
-      # This is the value the container sees, so empty means Go's own default
-      # (proxy.golang.org) — set a mirror where that CDN is unreachable, since
-      # proxy.golang.org redirects module zips to storage.googleapis.com and a
-      # network that blocks it answers 403 mid-download:
-      #   GOPROXY=https://goproxy.cn,direct
+      # Go module proxy for the entrypoint's plugin build (and any rebuild after a
+      # changed PLUGINS_REF). Empty lets the container probe the default proxy and
+      # fall back to a mirror if this network blocks it (proxy.golang.org redirects
+      # module zips to storage.googleapis.com, which some networks 403); set one
+      # explicitly to skip the probe, e.g. GOPROXY=https://goproxy.cn,direct
       GOPROXY: ${GOPROXY:-}
     volumes:
       # SQLite database (workflows, contexts, prompts, human tasks, vectors).
       # Without this, every restart starts from an empty canvas.
       - ./data:/data
-      # Checkout + Go module cache + pnpm store for the self-building image, so
-      # a restart is quick instead of a full re-clone and rebuild. With the baked
-      # image it holds only the plugin sources + Go module cache the entrypoint
-      # uses to build the plugin nodes.
+      # Plugin sources + Go module cache the entrypoint uses to build the plugin
+      # nodes, so a rebuild (changed PLUGINS_REF) is quick instead of a full
+      # re-clone and re-download.
       - flomorphic-src:/src
       # Built plugin-node binaries (+ a .ref stamp of PLUGINS_REPO@PLUGINS_REF).
       # The baked image ships api + canvas but NOT the plugins, so the entrypoint
@@ -91,8 +83,9 @@ services:
       - inflow_net
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1/healthz"]
-      # The self-building image clones and compiles on first start, which can
-      # take several minutes — hence the long start period.
+      # api + canvas are baked, so startup is quick — but the FIRST start builds
+      # the plugin nodes (clone + compile, once per repo@ref), which needs a few
+      # minutes on a cold cache; hence the generous start period.
       start_period: 600s
       start_interval: 5s
       interval: 30s
