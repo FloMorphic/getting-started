@@ -34,7 +34,10 @@
 # arm64 is genuinely per-arch (a cgo sqlite build); on an amd64 host it compiles
 # under QEMU — slower, so budget for it or run `release` on an arm64 machine.
 
-VERSION    := $(shell git describe --tags --abbrev=0 2>/dev/null)
+# Highest version tag on the current commit. `git describe` can't disambiguate
+# several tags stacked on one commit (all at distance 0), so sort by version and
+# take the top instead. Empty if HEAD isn't tagged — check-version catches that.
+VERSION    := $(shell git tag --points-at HEAD --sort=-v:refname 2>/dev/null | head -n1)
 IMAGE_NAME := mehdishokohi/flomorphic
 
 # What the image is built from: branches or tags in the component repos, never
