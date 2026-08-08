@@ -108,14 +108,14 @@ published, baked image and asks only a couple of things:
 | --- | --- |
 | **Install directory** | where the compose stacks and the database land |
 | **Platform: the one already running, or a new one?** | FloMorphic is a product *on* the Inflowenger runtime. A new platform is installed by [the Inflowenger installer](https://github.com/Inflowenger/getting-started) itself — one source of truth, not a copy |
-| **Advanced options (optional)** | override the ports (canvas `8088`, API `8026`) and the `PLUGINS_REF` the container builds the plugin nodes from |
+| **Advanced options (optional)** | override the ports (canvas `8088`, API `8026`) |
 
 Building an image is a maintainer job, not an install-time one — the installer
 always pulls. To build one yourself, `make build` / `make release` (see the
 [Makefile](./Makefile)).
 
 The builtin plugin nodes are not one of the questions: they are what the canvas's
-stock nodes run as, so the container always clones and builds them. `PLUGINS_ENABLED=0`
+stock nodes run as, so the image always bakes them in. `PLUGINS_ENABLED=0`
 is still there for a canvas + API with no platform behind it.
 
 Everything it asks can be set with an env var instead (`ASSUME_YES=1` for an
@@ -127,7 +127,7 @@ unattended run) — see the header of [`install.sh`](./install.sh).
 ├── inspector/         inflow-inspector       (only with INSTALL_INSPECTOR=1)
 └── flomorphic/
     ├── docker-compose.yml
-    ├── .env           image ref, ports, plugin ref, and the shared API Secret Key
+    ├── .env           image ref, ports, and the shared API Secret Key
     └── data/          the SQLite database — workflows, contexts, prompts, vectors
 ```
 
@@ -136,15 +136,14 @@ When it finishes: the canvas on **http://localhost:8088**, the API on
 
 ```bash
 cd <install dir>/flomorphic
-docker compose logs -f          # follow the first boot (it builds the plugin nodes once)
+docker compose logs -f          # follow the boot
 docker compose down             # stop
 docker compose up -d            # start again
 ```
 
-The canvas, the API and the plugin nodes ship as **one image**. The api and canvas
-are baked in, so it starts fast; only the plugin nodes are built on first start
-(once, cached on a volume). Why it is one container — and how to run your own
-plugin set — is in
+The canvas, the API and the plugin nodes ship as **one image**, all baked in
+per-arch (amd64 + arm64), so it starts fast and builds nothing at run time. Why it
+is one container — and how to run your own plugin set — is in
 [Architecture → One container, on purpose](./docs/architecture.md#one-container-on-purpose).
 
 ### Running from source
@@ -188,9 +187,9 @@ mode actually means.
 > **A Go build that dies on `403 Forbidden`** is a network problem, not a broken
 > checkout: `proxy.golang.org` redirects module zips to `storage.googleapis.com`,
 > which some networks block. Point Go at a mirror and it goes away — from source
-> `export GOPROXY=https://goproxy.cn,direct`, for the installed stack `GOPROXY=` in
-> `flomorphic/.env` (the container compiles on start), and for an image build
-> `--build-arg GOPROXY=https://goproxy.cn,direct`.
+> `export GOPROXY=https://goproxy.cn,direct`, and for an image build
+> `--build-arg GOPROXY=https://goproxy.cn,direct`. The installed stack needs
+> nothing: everything is baked, so it never compiles at run time.
 
 | Service | From source | Installed |
 | --- | --- | --- |

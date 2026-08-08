@@ -43,13 +43,6 @@
 #                       Not prompted for: the builtin nodes are part of the
 #                       product, not an add-on. 0 is an escape hatch for running
 #                       the canvas + API alone (see `make run`).
-#   PLUGINS_REPO        plugin repo cloned by the container  (default: FloMorphic/builtin-plugins)
-#   PLUGINS_REF         branch/tag for it                    (default: main)
-#   FLOMORPHIC_PLUGINS_DIR  host dir for the built plugin binaries, bind-mounted
-#                       into the install dir next to ./data  (default: ./plugins)
-#   GOPROXY             Go module proxy for the container's plugin build
-#                       (default: image default). Set a mirror where the default
-#                       CDN is blocked, e.g. GOPROXY=https://goproxy.cn,direct.
 #   REPO_RAW / REPO_REF raw base URL + ref the compose file is fetched from
 #   PLATFORM_INSTALLER  URL of the Inflowenger platform installer
 #   ASSUME_YES          1 — accept all defaults, no prompts  (default: 0)
@@ -73,20 +66,6 @@ FLOMORPHIC_PORT="${FLOMORPHIC_PORT:-8088}"
 FLOMORPHIC_API_PORT="${FLOMORPHIC_API_PORT:-8026}"
 PLUGINS_ENABLED="${PLUGINS_ENABLED:-1}"
 AUTH_ENABLED="${AUTH_ENABLED:-false}"
-PLUGINS_REPO="${PLUGINS_REPO:-https://github.com/FloMorphic/builtin-plugins.git}"
-PLUGINS_REF="${PLUGINS_REF:-main}"
-# Where the container's compiled plugin-node binaries land — a bind mount into
-# the install directory (next to ./data) rather than a Docker-managed named
-# volume, so "built once per repo@ref" sits in a known place you can inspect,
-# back up or wipe. Relative paths resolve against flomorphic/ (the compose dir);
-# set an absolute path to put them on a different disk.
-FLOMORPHIC_PLUGINS_DIR="${FLOMORPHIC_PLUGINS_DIR:-./plugins}"
-# Inherited from the caller's shell when set, so a machine already configured for
-# a Go mirror needs nothing extra here. Left empty, the container itself probes the
-# default Go proxy at start and falls back to a mirror if this network blocks it
-# (see docker/entrypoint.sh:ensure_goproxy) — detection must run where the plugin
-# build does, since the container's egress can differ from this host's.
-GOPROXY="${GOPROXY:-}"
 REPO_RAW="${REPO_RAW:-https://raw.githubusercontent.com/FloMorphic/getting-started}"
 REPO_REF="${REPO_REF:-main}"
 PLATFORM_INSTALLER="${PLATFORM_INSTALLER:-https://raw.githubusercontent.com/Inflowenger/getting-started/main/install.sh}"
@@ -285,30 +264,21 @@ fi
 # `make release`), not an install-time choice — FLOMORPHIC_IMAGE overrides the ref.
 FLOMORPHIC_IMAGE="${FLOMORPHIC_IMAGE:-$IMAGE_NS/flomorphic:$IMAGE_TAG}"
 
-if have_tty && confirm "Set advanced options (ports, plugin ref)?" n; then
+if have_tty && confirm "Set advanced options (ports)?" n; then
   FLOMORPHIC_PORT="$(ask "Host port for the canvas" "$FLOMORPHIC_PORT")"
   FLOMORPHIC_API_PORT="$(ask "Host port for the API" "$FLOMORPHIC_API_PORT")"
-  PLUGINS_REF="$(ask "builtin-plugins branch/tag" "$PLUGINS_REF")"
 fi
 
 # The builtin plugin nodes are not asked about. They are what the canvas's stock
-# nodes RUN as — the container clones the repo, builds every plugin in it and
-# credentials them against the API it just started. Turning them off leaves a
-# canvas whose nodes cannot execute, which is not an install-time choice anyone
-# can make usefully; naming two of them in a prompt only asked the user to judge
-# components they have no way to evaluate yet. PLUGINS_ENABLED=0 remains for the
-# one case that wants it — canvas + API with no platform, as in `make run`.
+# nodes RUN as — the published image bakes them in per-arch and credentials them
+# against the API it just started. Turning them off leaves a canvas whose nodes
+# cannot execute, which is not an install-time choice anyone can make usefully.
+# PLUGINS_ENABLED=0 remains for the one case that wants it — canvas + API with no
+# platform, as in `make run`.
 
 # ── write the stack ───────────────────────────────────────────────────────────
 step "Writing the FloMorphic stack -> $FLOMORPHIC_DIR/flomorphic"
 mkdir -p "$FLOMORPHIC_DIR/flomorphic/data"
-# The plugin-binary bind mount must exist before `up`, or Docker creates it
-# root-owned. Relative paths hang off the compose dir; absolute ones are taken
-# as-is (a user pointing at a bigger disk).
-case "$FLOMORPHIC_PLUGINS_DIR" in
-  /*) mkdir -p "$FLOMORPHIC_PLUGINS_DIR" ;;
-  *)  mkdir -p "$FLOMORPHIC_DIR/flomorphic/${FLOMORPHIC_PLUGINS_DIR#./}" ;;
-esac
 
 # The compose file is a single source of truth — taken from this checkout when
 # there is one, fetched from the repo otherwise. Every image ref and port in it
@@ -340,11 +310,7 @@ fi
   printf 'FLOMORPHIC_PORT=%s\n'         "$FLOMORPHIC_PORT"
   printf 'FLOMORPHIC_API_PORT=%s\n'     "$FLOMORPHIC_API_PORT"
   printf 'PLUGINS_ENABLED=%s\n'         "$PLUGINS_ENABLED"
-  printf 'PLUGINS_REPO=%s\n'            "$PLUGINS_REPO"
-  printf 'PLUGINS_REF=%s\n'             "$PLUGINS_REF"
-  printf 'FLOMORPHIC_PLUGINS_DIR=%s\n'  "$FLOMORPHIC_PLUGINS_DIR"
   printf 'PLUGINS=\n'
-  printf 'GOPROXY=%s\n'                 "$GOPROXY"
 } > "$FLOMORPHIC_DIR/flomorphic/.env"
 chmod 600 "$FLOMORPHIC_DIR/flomorphic/.env"
 ok "flomorphic/docker-compose.yml + .env written"
@@ -362,9 +328,8 @@ fi
 # ── start ─────────────────────────────────────────────────────────────────────
 step "Starting FloMorphic"
 ( cd "$FLOMORPHIC_DIR/flomorphic" && $DC pull --quiet 2>/dev/null || true )
-info "the published image is baked (api + canvas compiled in), so it starts fast."
-info "the FIRST start builds the plugin nodes once, which takes a couple of minutes;"
-info "later starts reuse them from $FLOMORPHIC_PLUGINS_DIR (in the install dir)."
+info "the published image is fully baked (api, canvas AND plugin nodes compiled"
+info "in per-arch), so it starts fast — nothing is cloned or built at run time."
 if ! ( cd "$FLOMORPHIC_DIR/flomorphic" && $DC up -d ); then
   printf '\n'
   die "\`$DC up -d\` failed — see the error above."
@@ -385,7 +350,7 @@ done
 if [ "$ready" = "1" ]; then
   ok "FloMorphic is up"
 else
-  warn "not ready yet. That is normal on a first start (it builds the plugin nodes); follow it with:"
+  warn "not ready yet — give it a moment and follow it with:"
   info "  (cd $FLOMORPHIC_DIR/flomorphic && $DC logs -f)"
 fi
 
@@ -394,11 +359,11 @@ step "Done"
 printf '\n%s  FloMorphic%s\n' "$B" "$RST"
 info "Canvas               http://localhost:$FLOMORPHIC_PORT"
 info "API (direct)         http://localhost:$FLOMORPHIC_API_PORT   ${DIM}(the canvas uses /api behind the canvas port)${RST}"
-# Deliberately not a list: the image builds whatever plugin the repo carries (any
+# Deliberately not a list: the image bakes whatever plugin the repo carries (any
 # top-level folder with a go.mod), so a name spelled out here goes stale the next
 # time one is added.
 if [ "$PLUGINS_ENABLED" = "1" ]; then
-  info "Plugin nodes         built from $PLUGINS_REPO@$PLUGINS_REF, started inside the container"
+  info "Plugin nodes         baked into the image per-arch, started inside the container"
 else
   info "Plugin nodes         disabled (PLUGINS_ENABLED=0) — the canvas's nodes will not execute"
 fi
@@ -420,6 +385,5 @@ info "Database             $FLOMORPHIC_DIR/flomorphic/data/flomorphic.db"
 info "Follow the boot      (cd $FLOMORPHIC_DIR/flomorphic && $DC logs -f)"
 info "Stop FloMorphic      (cd $FLOMORPHIC_DIR/flomorphic && $DC down)"
 info "Update the image     edit FLOMORPHIC_IMAGE in flomorphic/.env, then $DC pull && $DC up -d"
-info "Swap the plugin ref  edit PLUGINS_REF in flomorphic/.env, then $DC up -d --force-recreate"
 [ "$PLATFORM_MODE" = new ] && info "Stop the platform    (cd $FLOMORPHIC_DIR/platform && $DC down)"
 printf '\n'

@@ -1,7 +1,7 @@
 # Developing FloMorphic from source
 
-The installed stack is one container with the api and canvas baked in (only the
-plugin nodes build on first start). To *change* FloMorphic
+The installed stack is one container with the api, canvas and plugin nodes all
+baked in. To *change* FloMorphic
 you take it apart: run `morph-api` from your own checkout, the canvas on Vite,
 the plugin nodes as ordinary processes you can attach a debugger to — all bound
 to a platform (Infra + a Fractal) that keeps running in Docker exactly as

@@ -1,18 +1,18 @@
 # syntax=docker/dockerfile:1
 #
-# Baked image for the FloMorphic stack: morph-api + morph-wapp compiled at
-# image-build time, served behind one nginx. The builtin plugin nodes are NOT
-# baked — they are cloned and built by the entrypoint at first container start.
+# Baked image for the FloMorphic stack: morph-api + morph-wapp + the builtin
+# plugin nodes, all compiled at image-build time and served behind one nginx.
 #
-# Why the split: the api (cgo: sqlite + sqlite-vec) and the canvas (pnpm build)
-# are heavy and slow to compile, so baking them makes startup near-instant and
-# takes their build off the boot path entirely. The plugin nodes are small pure-Go
-# binaries and cheap to build, and leaving them to the entrypoint keeps the one
-# thing worth swapping at runtime swappable: point PLUGINS_REPO/PLUGINS_REF at
-# another repo or ref and the entrypoint rebuilds them in place, no new image.
-# Trade-off: the plugin build needs github + a Go proxy reachable at first start
-# (ensure_goproxy handles the mirror); persist /app/plugins on a volume to make it
-# build once per repo@ref instead of on every container recreate.
+# Why bake everything: the api (cgo: sqlite + sqlite-vec) and the canvas (pnpm
+# build) are heavy, and the plugin nodes — though small pure-Go binaries — used to
+# be cloned and compiled by the entrypoint at first container start, which put a
+# github + Go-proxy round-trip on the boot path and made a bad first-start
+# experience on networks where either is slow or blocked. Building them into the
+# image instead makes startup near-instant and needs no toolchain or network to
+# run. Every plugin folder is compiled here, so the binaries are naturally
+# multi-arch: buildx builds this stage FOR the target platform (natively or under
+# QEMU), so `go build` emits an amd64 binary for linux/amd64 and an arm64 binary
+# for linux/arm64 with no cross-compile flags.
 #
 # This is the only image FloMorphic ships. It is what `install.sh` pulls, what
 # `make build` produces locally, and what CI publishes per-arch. To build from
@@ -58,7 +58,7 @@ RUN apk add --no-cache git make build-base
 # tracked at their default branch and are not expected to carry a matching tag.
 # That branch is `main` in one repo and `master` in the next, so a ref the remote
 # does not have falls back to its HEAD rather than failing the build. Same for the
-# canvas clone below, and in entrypoint.sh when it builds the plugin nodes.
+# canvas and plugin clones below.
 RUN git clone --depth 1 -b "$API_REF" "$API_REPO" /src/api \
  || { rm -rf /src/api; git clone --depth 1 "$API_REPO" /src/api; }
 WORKDIR /src/api
@@ -67,10 +67,28 @@ WORKDIR /src/api
 RUN make build BINARY=/out/flomorphic-api \
       CGO_CFLAGS="-I/src/api/repository/sqlite/cdeps $MUSL_CFLAGS"
 
-# The builtin plugin nodes are intentionally NOT built here — the entrypoint
-# clones PLUGINS_REPO@PLUGINS_REF and compiles them at first container start (see
-# ensure_plugin_binaries), which keeps them swappable at runtime. The runtime
-# stage below therefore keeps the Go toolchain and git on purpose.
+# ── the builtin plugin nodes ──────────────────────────────────────────────────
+#
+# One repo of small pure-Go binaries (CGO off), one folder per node. This stage
+# is built for the TARGET platform, so `go build` produces target-arch binaries
+# with no GOARCH juggling — amd64 natively on an amd64 builder, arm64 under QEMU
+# (or natively on an arm64 builder). Every folder with a go.mod is compiled and
+# dropped into /out/plugins/<folder>.
+FROM golang:1.26-alpine AS plugins-build
+ARG PLUGINS_REPO
+ARG PLUGINS_REF
+ARG GOPROXY
+RUN apk add --no-cache git
+RUN git clone --depth 1 -b "$PLUGINS_REF" "$PLUGINS_REPO" /src/plugins \
+ || { rm -rf /src/plugins; git clone --depth 1 "$PLUGINS_REPO" /src/plugins; }
+WORKDIR /src/plugins
+RUN set -eu; mkdir -p /out/plugins; \
+    for d in */; do \
+      [ -f "${d}go.mod" ] || continue; \
+      name="${d%/}"; \
+      echo "building plugin $name"; \
+      ( cd "$d" && CGO_ENABLED=0 go build -trimpath -o "/out/plugins/$name" . ); \
+    done
 
 # ── the canvas ────────────────────────────────────────────────────────────────
 FROM node:22-alpine AS wapp-build
@@ -88,32 +106,24 @@ RUN VITE_API_BASE_URL="$VITE_API_BASE_URL" pnpm build
 
 # ── runtime ───────────────────────────────────────────────────────────────────
 #
-# Still a Go image, deliberately: PLUGINS_REPO/PLUGINS_REF can be pointed at
-# another repo or ref at run time, and the entrypoint then rebuilds the plugin
-# binaries in place. Without a toolchain that extension point would be gone.
-FROM golang:1.26-alpine
-RUN apk add --no-cache git nginx curl jq openssl ca-certificates tzdata
+# Everything is baked, so no toolchain and no git here — just what the entrypoint
+# needs to serve and supervise: nginx, plus curl/jq/openssl for the API health
+# check and the plugin-credential mint.
+FROM alpine:3.21
+RUN apk add --no-cache nginx curl jq openssl ca-certificates tzdata
 
 COPY --from=api-build     /out/flomorphic-api /app/flomorphic-api
 COPY --from=wapp-build    /src/wapp/dist      /srv/www
+COPY --from=plugins-build /out/plugins        /app/plugins
 # The seed is the source of truth for the builtin nodes' PLUGIN_IDs; keep a copy
 # so the entrypoint can resolve them even if the API is not answering yet.
-COPY --from=api-build     /src/api/repository/sqlite/seed /src/api/repository/sqlite/seed
+COPY --from=api-build     /src/api/repository/sqlite/seed/builtins.json /app/seed/builtins.json
 
 COPY docker/nginx.conf.tmpl /etc/nginx/nginx.conf.tmpl
 COPY docker/entrypoint.sh   /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh && mkdir -p /data /src
+RUN chmod +x /usr/local/bin/entrypoint.sh && mkdir -p /data
 
-ARG PLUGINS_REPO
-ARG PLUGINS_REF
-ARG GOPROXY
-# Carried into the container so a runtime plugin rebuild (a changed PLUGINS_REF)
-# uses the same reachable proxy the image was built with.
-ENV GOPROXY=${GOPROXY} \
-    PLUGINS_REPO=${PLUGINS_REPO} \
-    PLUGINS_REF=${PLUGINS_REF} \
-    PLUGINS_ENABLED=1 \
-    SRC_DIR=/src \
+ENV PLUGINS_ENABLED=1 \
     APP_DIR=/app \
     WEB_ROOT=/srv/www \
     PORT=8025 \

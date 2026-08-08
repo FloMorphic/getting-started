@@ -7,6 +7,6 @@ __*
 .env.bak
 **/.env.bak
 
-# Local runtime state (SQLite db, vectors, human tasks, plugin sources)
+# Local runtime state (SQLite db, vectors, human tasks)
 flomorphic/data/
 platform/

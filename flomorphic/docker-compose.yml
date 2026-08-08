@@ -7,6 +7,10 @@
 # proxies /api + /ws to the API on the loopback, so the browser only ever needs
 # ONE port and there is no CORS and no baked-in backend host name.
 #
+# The image is fully baked — api, canvas AND the per-arch plugin binaries are all
+# compiled in — so it needs no toolchain, no source volume and no network to
+# build anything at start.
+#
 # Requires the Inflowenger platform (Infra + a Fractal) to be up FIRST — this
 # stack joins the same external `inflow_net` network to reach Infra by name.
 # Get it from https://github.com/Inflowenger/getting-started, or let this repo's
@@ -43,43 +47,17 @@ services:
       DB_SOURCE: ${DB_SOURCE:-/data/flomorphic.db}
 
       # ── builtin plugin nodes (llm, mcp, …) ────────────────────────────────
-      # Cloned from one repo and started by the container's entrypoint once the
-      # API is up, all sharing a single credential minted on the builtin-plugins
-      # account. Each node's PLUGIN_ID comes from morph-api's seed, so saved
-      # workflows keep resolving across reinstalls.
+      # Baked into the image per-arch and started by the container's entrypoint
+      # once the API is up, all sharing a single credential minted on the
+      # builtin-plugins account. Each node's PLUGIN_ID comes from morph-api's seed,
+      # so saved workflows keep resolving across reinstalls.
       PLUGINS_ENABLED: ${PLUGINS_ENABLED:-1}
-      PLUGINS_REPO: ${PLUGINS_REPO:-https://github.com/FloMorphic/builtin-plugins.git}
-      PLUGINS_REF: ${PLUGINS_REF:-main}
-      # Comma-separated allow-list of folders to run; empty = every plugin found.
+      # Comma-separated allow-list of baked nodes to run; empty = every one found.
       PLUGINS: ${PLUGINS:-}
-      # Go module proxy for the entrypoint's plugin build (and any rebuild after a
-      # changed PLUGINS_REF). Empty lets the container probe the default proxy and
-      # fall back to a mirror if this network blocks it (proxy.golang.org redirects
-      # module zips to storage.googleapis.com, which some networks 403); set one
-      # explicitly to skip the probe, e.g. GOPROXY=https://goproxy.cn,direct
-      GOPROXY: ${GOPROXY:-}
     volumes:
       # SQLite database (workflows, contexts, prompts, human tasks, vectors).
       # Without this, every restart starts from an empty canvas.
       - ./data:/data
-      # Plugin sources + Go module cache the entrypoint uses to build the plugin
-      # nodes, so a rebuild (changed PLUGINS_REF) is quick instead of a full
-      # re-clone and re-download.
-      - flomorphic-src:/src
-      # Built plugin-node binaries (+ a .ref stamp of PLUGINS_REPO@PLUGINS_REF).
-      # The baked image ships api + canvas but NOT the plugins, so the entrypoint
-      # compiles them at first start; persisting them means that happens once per
-      # repo@ref instead of on every container recreate. Changing
-      # PLUGINS_REPO/PLUGINS_REF invalidates the stamp and triggers one rebuild.
-      #
-      # A bind mount into the install directory (default ./plugins, next to
-      # ./data) rather than a named volume, so the compiled binaries sit in a
-      # known, selectable place you can inspect, back up or wipe by hand. Point
-      # FLOMORPHIC_PLUGINS_DIR elsewhere (e.g. an absolute path on a bigger disk)
-      # to relocate them. NOT bound to /src: that volume also carries the baked
-      # seed (builtins.json) the entrypoint reads for PLUGIN_IDs, and a bind mount
-      # would shadow it — so plugin SOURCES + the Go cache stay in a named volume.
-      - ${FLOMORPHIC_PLUGINS_DIR:-./plugins}:/app/plugins
     ports:
       # The canvas — and everything the browser needs, via nginx.
       - "${FLOMORPHIC_PORT:-8088}:80"
@@ -91,10 +69,9 @@ services:
       - inflow_net
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1/healthz"]
-      # api + canvas are baked, so startup is quick — but the FIRST start builds
-      # the plugin nodes (clone + compile, once per repo@ref), which needs a few
-      # minutes on a cold cache; hence the generous start period.
-      start_period: 600s
+      # Everything is baked (api, canvas and plugin binaries), so startup is just
+      # process launch — no clone or compile on the boot path.
+      start_period: 60s
       start_interval: 5s
       interval: 30s
       timeout: 5s
@@ -106,8 +83,3 @@ networks:
   #   docker network create inflow_net
   inflow_net:
     external: true
-
-volumes:
-  # Plugin sources + Go module cache only. The built binaries are a bind mount
-  # into the install directory (see FLOMORPHIC_PLUGINS_DIR above), not here.
-  flomorphic-src:

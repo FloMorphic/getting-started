@@ -7,13 +7,13 @@
 # the entrypoint discovers and runs them itself. Nothing here publishes a
 # separate api/wapp image.
 #
-# The image is BAKED: morph-api and the canvas are compiled at image-build time,
-# so a container starts in seconds and needs no toolchain or network to serve.
-# The plugin nodes are the one exception — small pure-Go binaries the entrypoint
-# builds at first container start (cached on a volume), so PLUGINS_REF stays
-# swappable at run time without a new image. See docker/Dockerfile.flomorphic.
-# There is no build-everything-at-container-start image: to build from source,
-# clone the repos and `make build`.
+# The image is BAKED: morph-api, the canvas AND the builtin plugin nodes are all
+# compiled at image-build time, so a container starts in seconds and needs no
+# toolchain or network to run. The plugin binaries are built per-arch in the
+# image (buildx compiles that stage for the target platform), so amd64 and arm64
+# each get native binaries. See docker/Dockerfile.flomorphic. There is no
+# build-at-container-start image: to build from source, clone the repos and
+# `make build`.
 #
 # The version is the repo's own git tag — this repo is the release marker for
 # the product, so `git tag v0.2.0 && make release` is the whole ceremony.
@@ -52,10 +52,9 @@ WAPP_REF     ?= main
 PLUGINS_REPO ?= https://github.com/FloMorphic/builtin-plugins.git
 PLUGINS_REF  ?= main
 
-# Go module proxy. Passed as a build arg and carried into the runtime as
-# ENV GOPROXY, so this value is both (a) what the image compiles api + canvas
-# through and (b) what the entrypoint builds the plugin nodes through at first
-# start (and again if PLUGINS_REF changes). Empty leaves the Dockerfile default
+# Go module proxy. Passed as a build arg only — it is what the image compiles
+# api, canvas and the plugin nodes through. Not carried into the runtime (nothing
+# is built at run time anymore). Empty leaves the Dockerfile default
 # (proxy.golang.org) in place.
 #
 # It defaults to the mirror because proxy.golang.org redirects module zips to
@@ -84,9 +83,8 @@ PORT ?= 8088
 DOCKERFILE := docker/Dockerfile.flomorphic
 
 BUILDX := docker buildx build $(if $(BUILDER),--builder $(BUILDER),)
-# The refs the image clones during the build (api + canvas), and the ENV defaults
-# the entrypoint clones the plugin nodes at when the container first starts (still
-# overridable with `docker run -e` / the compose file).
+# The refs the image clones and builds during the build: api, canvas and the
+# plugin nodes are all baked from these.
 BUILD_ARGS := \
 	--build-arg API_REPO=$(API_REPO) \
 	--build-arg API_REF=$(API_REF) \

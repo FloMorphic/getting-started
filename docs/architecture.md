@@ -135,24 +135,23 @@ Two reasons, both structural rather than cosmetic:
   credential on the builtin-plugins account, and the component that mints it is
   `flomorphic-api` itself (`POST /extension/plugin/cred`). So the container's
   entrypoint starts the API, waits for `/health`, mints **one** multi-access
-  credential, clones the plugin repo, and runs every plugin folder in it with that
-  credential — each under the `PLUGIN_ID` the API's seed assigns to its builtin
-  node, so saved workflows keep resolving across reinstalls. Adding a plugin to
-  [`builtin-plugins`](https://github.com/FloMorphic/builtin-plugins) is enough; no
-  image change is needed.
+  credential, and runs every baked plugin binary with that credential — each under
+  the `PLUGIN_ID` the API's seed assigns to its builtin node, so saved workflows
+  keep resolving across reinstalls. Adding a plugin to
+  [`builtin-plugins`](https://github.com/FloMorphic/builtin-plugins) and rebuilding
+  the image is enough.
 
-Point `PLUGINS_REPO` / `PLUGINS_REF` somewhere else to run your own set, or
-`PLUGINS_ENABLED=0` to run the canvas without any.
+`PLUGINS_ENABLED=0` runs the canvas without any plugin node; to bake your own set,
+build the image with `--build-arg PLUGINS_REPO=… PLUGINS_REF=…`.
 
 ### The image
 
-One **baked** image, published and pulled by `install.sh`: morph-api and the
-canvas are compiled in at image-build time, so a container starts in seconds and
-needs no toolchain or network to serve. The builtin plugin nodes are the one
-exception — small pure-Go binaries the entrypoint clones and builds at **first
-container start** (cached on the `/app/plugins` volume), so `PLUGINS_REF` stays
-swappable without a new image. `/src` holds the plugin checkout and Go module
-cache so a later rebuild (a changed `PLUGINS_REF`) is quick. To build the whole
+One **fully baked** image, published and pulled by `install.sh`: morph-api, the
+canvas AND the builtin plugin nodes are all compiled in at image-build time, so a
+container starts in seconds and needs no toolchain or network to run. The plugin
+binaries are built per-arch in the image — buildx compiles that stage for the
+target platform, so amd64 and arm64 each get native binaries — dropped under
+`/app/plugins`, with no source checkout or volume at run time. To build the whole
 image from source, `make build` (or `make release` to publish).
 
 Dockerfile: [`docker/Dockerfile.flomorphic`](../docker/Dockerfile.flomorphic).
