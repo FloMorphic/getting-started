@@ -153,7 +153,7 @@ exception — small pure-Go binaries the entrypoint clones and builds at **first
 container start** (cached on the `/app/plugins` volume), so `PLUGINS_REF` stays
 swappable without a new image. `/src` holds the plugin checkout and Go module
 cache so a later rebuild (a changed `PLUGINS_REF`) is quick. To build the whole
-image from source, `install.sh --build` or `make build`.
+image from source, `make build` (or `make release` to publish).
 
 Dockerfile: [`docker/Dockerfile.flomorphic`](../docker/Dockerfile.flomorphic).
 Each component repo also carries its own Dockerfile — `flomorphic-api` (API +

@@ -15,8 +15,8 @@
 # build once per repo@ref instead of on every container recreate.
 #
 # This is the only image FloMorphic ships. It is what `install.sh` pulls, what
-# `install.sh --build` / `make build` produce locally, and what CI publishes
-# per-arch. To build from source, clone the component repos and `make build`.
+# `make build` produces locally, and what CI publishes per-arch. To build from
+# source, clone this repo and `make build` (or `make release` to publish).
 #
 # Build (context is this repo — it supplies docker/entrypoint.sh + nginx.conf).
 # The Makefile drives it:

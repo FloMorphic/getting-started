@@ -14,8 +14,11 @@
 #   1. install directory
 #   2. platform: use the one that is already running, or install a new one
 #      (delegated to the Inflowenger installer, so there is one source of truth)
-#   3. image: pull the published FloMorphic image, or build one from source here
-#   4. ports
+#   3. ports (behind an advanced-options prompt)
+#
+# It pulls the published, baked image (api + canvas compiled in). Building an
+# image is a maintainer job, not an install-time one — see `make build` /
+# `make release` and docs/development.md.
 #
 # It works both interactively (prompts read from /dev/tty even when piped through
 # curl) and non-interactively (drive it entirely with the env vars below).
@@ -27,8 +30,10 @@
 #   API_JWT_SECRET      Infra API Secret Key / shared secret (default: generated for a new platform)
 #   FRACTAL_TAGS        tags for a new platform's Fractal    (default: default)
 #   FRACTAL_NAME        container name for that Fractal      (default: fractal-1)
-#   INSTALL_INSPECTOR   1/0 — inspector panel with a new platform (default: prompted, else 0)
-#   IMAGE_MODE          pull | build                         (default: pull)
+#   INSTALL_INSPECTOR   1/0 — inspector panel with a new platform (default: 0)
+#                       Not prompted for: the inspector is an Inflowenger
+#                       developer panel, not part of a FloMorphic install. Set
+#                       INSTALL_INSPECTOR=1 to opt in.
 #   IMAGE_NS            Docker Hub namespace                 (default: mehdishokohi)
 #   IMAGE_TAG           tag for the pulled image             (default: latest)
 #   FLOMORPHIC_IMAGE    full image ref, overrides NS/TAG     (default: $IMAGE_NS/flomorphic:$IMAGE_TAG)
@@ -40,16 +45,14 @@
 #                       the canvas + API alone (see `make run`).
 #   PLUGINS_REPO        plugin repo cloned by the container  (default: FloMorphic/builtin-plugins)
 #   PLUGINS_REF         branch/tag for it                    (default: main)
-#   API_REF / WAPP_REF  branch/tag the image builds at start (default: main)
-#   GOPROXY             Go module proxy for those compiles  (default: image default)
-#                       Set a mirror where the default CDN is blocked, e.g.
-#                       GOPROXY=https://goproxy.cn,direct — see below.
+#   GOPROXY             Go module proxy for the container's plugin build
+#                       (default: image default). Set a mirror where the default
+#                       CDN is blocked, e.g. GOPROXY=https://goproxy.cn,direct.
 #   REPO_RAW / REPO_REF raw base URL + ref the compose file is fetched from
-#   REPO_GIT            git URL cloned for `--build`
 #   PLATFORM_INSTALLER  URL of the Inflowenger platform installer
 #   ASSUME_YES          1 — accept all defaults, no prompts  (default: 0)
 #
-# Flags:  --build   same as IMAGE_MODE=build     --yes  same as ASSUME_YES=1
+# Flags:  --yes  same as ASSUME_YES=1
 #
 set -euo pipefail
 
@@ -60,8 +63,7 @@ INFLOW_INFRA_API="${INFLOW_INFRA_API:-}"
 API_JWT_SECRET="${API_JWT_SECRET:-}"
 FRACTAL_TAGS="${FRACTAL_TAGS:-default}"
 FRACTAL_NAME="${FRACTAL_NAME:-fractal-1}"
-INSTALL_INSPECTOR="${INSTALL_INSPECTOR:-}"
-IMAGE_MODE="${IMAGE_MODE:-}"
+INSTALL_INSPECTOR="${INSTALL_INSPECTOR:-0}"
 IMAGE_NS="${IMAGE_NS:-mehdishokohi}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
 FLOMORPHIC_IMAGE="${FLOMORPHIC_IMAGE:-}"
@@ -71,24 +73,19 @@ PLUGINS_ENABLED="${PLUGINS_ENABLED:-1}"
 AUTH_ENABLED="${AUTH_ENABLED:-false}"
 PLUGINS_REPO="${PLUGINS_REPO:-https://github.com/FloMorphic/builtin-plugins.git}"
 PLUGINS_REF="${PLUGINS_REF:-main}"
-API_REF="${API_REF:-main}"
-WAPP_REF="${WAPP_REF:-main}"
 # Inherited from the caller's shell when set, so a machine already configured for
 # a Go mirror needs nothing extra here. Left empty, the container itself probes the
 # default Go proxy at start and falls back to a mirror if this network blocks it
-# (see docker/entrypoint.sh:ensure_goproxy) — detection must run where the build
-# does, since the container's egress can differ from this host's.
+# (see docker/entrypoint.sh:ensure_goproxy) — detection must run where the plugin
+# build does, since the container's egress can differ from this host's.
 GOPROXY="${GOPROXY:-}"
 REPO_RAW="${REPO_RAW:-https://raw.githubusercontent.com/FloMorphic/getting-started}"
 REPO_REF="${REPO_REF:-main}"
-REPO_GIT="${REPO_GIT:-https://github.com/FloMorphic/getting-started.git}"
 PLATFORM_INSTALLER="${PLATFORM_INSTALLER:-https://raw.githubusercontent.com/Inflowenger/getting-started/main/install.sh}"
 ASSUME_YES="${ASSUME_YES:-0}"
 
 for arg in "$@"; do
   case "$arg" in
-    --build) IMAGE_MODE=build ;;
-    --pull)  IMAGE_MODE=pull ;;
     --yes|-y) ASSUME_YES=1 ;;
     -h|--help)
       # Only possible when running from a file; `curl | bash` has no source to read.
@@ -100,8 +97,8 @@ for arg in "$@"; do
 done
 
 # Where this script lives, when it lives anywhere: run from a clone, the repo's
-# own compose file and Dockerfiles are used as-is; piped through curl, they are
-# fetched from REPO_RAW/REPO_REF instead.
+# own compose file is used as-is; piped through curl, it is fetched from
+# REPO_RAW/REPO_REF instead.
 SCRIPT_DIR=""
 case "${BASH_SOURCE[0]:-}" in
   ''|bash|-|/dev/fd/*|/proc/self/fd/*) ;;
@@ -242,9 +239,9 @@ if [ "$PLATFORM_MODE" = new ]; then
 
   FRACTAL_TAGS="$(ask "Fractal tags (comma-separated)" "$FRACTAL_TAGS")"
   FRACTAL_NAME="$(ask "Fractal container name" "$FRACTAL_NAME")"
-  if [ -z "$INSTALL_INSPECTOR" ]; then
-    if confirm "Also install the inflow-inspector developer panel?" n; then INSTALL_INSPECTOR=1; else INSTALL_INSPECTOR=0; fi
-  fi
+  # The inflow-inspector panel is an Inflowenger developer tool, not part of a
+  # FloMorphic install, so it is not prompted for here — off unless the caller
+  # sets INSTALL_INSPECTOR=1.
 
   PLATFORM_SH="$(mktemp)"
   fetch "$PLATFORM_INSTALLER" "$PLATFORM_SH"
@@ -276,26 +273,14 @@ else
 fi
 
 # ── 3. the image ──────────────────────────────────────────────────────────────
-if [ -z "$IMAGE_MODE" ]; then
-  if confirm "Build the FloMorphic image from source instead of pulling the published one?" n; then
-    IMAGE_MODE=build
-  else
-    IMAGE_MODE=pull
-  fi
-fi
+# Always the published, baked image. Building is a maintainer job (`make build` /
+# `make release`), not an install-time choice — FLOMORPHIC_IMAGE overrides the ref.
+FLOMORPHIC_IMAGE="${FLOMORPHIC_IMAGE:-$IMAGE_NS/flomorphic:$IMAGE_TAG}"
 
-if [ "$IMAGE_MODE" = pull ]; then
-  FLOMORPHIC_IMAGE="${FLOMORPHIC_IMAGE:-$IMAGE_NS/flomorphic:$IMAGE_TAG}"
-else
-  FLOMORPHIC_IMAGE="${FLOMORPHIC_IMAGE:-flomorphic:local}"
-fi
-
-if have_tty && confirm "Set advanced options (source refs, ports)?" n; then
-  API_REF="$(ask "morph-api branch/tag" "$API_REF")"
-  WAPP_REF="$(ask "morph-wapp branch/tag" "$WAPP_REF")"
-  PLUGINS_REF="$(ask "builtin-plugins branch/tag" "$PLUGINS_REF")"
+if have_tty && confirm "Set advanced options (ports, plugin ref)?" n; then
   FLOMORPHIC_PORT="$(ask "Host port for the canvas" "$FLOMORPHIC_PORT")"
   FLOMORPHIC_API_PORT="$(ask "Host port for the API" "$FLOMORPHIC_API_PORT")"
+  PLUGINS_REF="$(ask "builtin-plugins branch/tag" "$PLUGINS_REF")"
 fi
 
 # The builtin plugin nodes are not asked about. They are what the canvas's stock
@@ -358,61 +343,14 @@ else
   ok "created network inflow_net"
 fi
 
-# ── build from source, if asked ───────────────────────────────────────────────
-if [ "$IMAGE_MODE" = build ]; then
-  step "Building $FLOMORPHIC_IMAGE from source"
-  # The build context is this repo (it carries docker/entrypoint.sh and the
-  # nginx template); the Dockerfile clones morph-api, morph-wapp and the plugin
-  # repo itself, so nothing else needs to be checked out by hand.
-  if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/docker/Dockerfile.flomorphic" ]; then
-    BUILD_CTX="$SCRIPT_DIR"
-    info "building from this checkout: $BUILD_CTX"
-  else
-    command -v git >/dev/null 2>&1 || die "git is required to build from source (or run install.sh from a clone of this repo)."
-    BUILD_CTX="$FLOMORPHIC_DIR/flomorphic/.src"
-    if [ -d "$BUILD_CTX/.git" ]; then
-      info "updating build context: $BUILD_CTX"
-      git -C "$BUILD_CTX" fetch --depth 1 origin "$REPO_REF" >/dev/null 2>&1
-      git -C "$BUILD_CTX" checkout -q FETCH_HEAD
-    else
-      info "cloning $REPO_GIT @ $REPO_REF -> $BUILD_CTX"
-      rm -rf "$BUILD_CTX"
-      git clone --depth 1 -b "$REPO_REF" "$REPO_GIT" "$BUILD_CTX" >/dev/null
-    fi
-  fi
-  info "this compiles the API (cgo), the canvas and every plugin — expect a few minutes."
-  # GOPROXY only when the caller set one, so the image default stands otherwise.
-  set -- \
-    -f "$BUILD_CTX/docker/Dockerfile.flomorphic" \
-    --build-arg "API_REF=$API_REF" \
-    --build-arg "WAPP_REF=$WAPP_REF" \
-    --build-arg "PLUGINS_REPO=$PLUGINS_REPO" \
-    --build-arg "PLUGINS_REF=$PLUGINS_REF"
-  [ -n "$GOPROXY" ] && set -- "$@" --build-arg "GOPROXY=$GOPROXY"
-  if ! docker build "$@" -t "$FLOMORPHIC_IMAGE" "$BUILD_CTX"; then
-    printf '\n'
-    warn "if it failed with a 403 while downloading Go modules, the default module"
-    warn "CDN (storage.googleapis.com) is blocked on this network. Retry with a mirror:"
-    info "  GOPROXY=https://goproxy.cn,direct $0 --build"
-    die "docker build failed."
-  fi
-  ok "built $FLOMORPHIC_IMAGE"
-fi
-
 # ── start ─────────────────────────────────────────────────────────────────────
 step "Starting FloMorphic"
-if [ "$IMAGE_MODE" = pull ]; then
-  ( cd "$FLOMORPHIC_DIR/flomorphic" && $DC pull --quiet 2>/dev/null || true )
-  info "the published image is baked (api + canvas compiled in), so it starts fast."
-  info "the FIRST start builds the plugin nodes once, which takes a couple of minutes;"
-  info "later starts reuse them from a volume."
-fi
+( cd "$FLOMORPHIC_DIR/flomorphic" && $DC pull --quiet 2>/dev/null || true )
+info "the published image is baked (api + canvas compiled in), so it starts fast."
+info "the FIRST start builds the plugin nodes once, which takes a couple of minutes;"
+info "later starts reuse them from a volume."
 if ! ( cd "$FLOMORPHIC_DIR/flomorphic" && $DC up -d ); then
   printf '\n'
-  if [ "$IMAGE_MODE" = pull ]; then
-    warn "if the image could not be pulled, build one from source instead:"
-    info "  curl -fsSL $REPO_RAW/$REPO_REF/install.sh | bash -s -- --build"
-  fi
   die "\`$DC up -d\` failed — see the error above."
 fi
 
@@ -465,6 +403,7 @@ info "Stacks live in       $FLOMORPHIC_DIR"
 info "Database             $FLOMORPHIC_DIR/flomorphic/data/flomorphic.db"
 info "Follow the boot      (cd $FLOMORPHIC_DIR/flomorphic && $DC logs -f)"
 info "Stop FloMorphic      (cd $FLOMORPHIC_DIR/flomorphic && $DC down)"
-info "Update to a new ref  edit flomorphic/.env (API_REF / WAPP_REF / PLUGINS_REF), then $DC up -d --force-recreate"
+info "Update the image     edit FLOMORPHIC_IMAGE in flomorphic/.env, then $DC pull && $DC up -d"
+info "Swap the plugin ref  edit PLUGINS_REF in flomorphic/.env, then $DC up -d --force-recreate"
 [ "$PLATFORM_MODE" = new ] && info "Stop the platform    (cd $FLOMORPHIC_DIR/platform && $DC down)"
 printf '\n'

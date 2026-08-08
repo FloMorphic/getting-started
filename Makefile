@@ -34,10 +34,11 @@
 # arm64 is genuinely per-arch (a cgo sqlite build); on an amd64 host it compiles
 # under QEMU — slower, so budget for it or run `release` on an arm64 machine.
 
-# Highest version tag on the current commit. `git describe` can't disambiguate
-# several tags stacked on one commit (all at distance 0), so sort by version and
-# take the top instead. Empty if HEAD isn't tagged — check-version catches that.
-VERSION    := $(shell git tag --points-at HEAD --sort=-v:refname 2>/dev/null | head -n1)
+# The version every image is tagged with. Set it by hand for each release and
+# bump it here. Not derived from git — `make docker` labels the images with
+# exactly this string. Override for a one-off without editing the file:
+#   make docker VERSION=v0.2.0
+VERSION ?= v0.1.6
 IMAGE_NAME := mehdishokohi/flomorphic
 
 # What the image is built from: branches or tags in the component repos, never
@@ -118,14 +119,12 @@ version: ## Print the version and the tags a release would push
 	@printf 'release       %s:%s  %s:latest\n' \
 	  "$(IMAGE_NAME)" "$(VERSION)" "$(IMAGE_NAME)"
 
-# Every push target goes through this: `git describe` on a repo with no tags is
-# empty, and an empty version would silently publish `:-amd64` and clobber
-# `:latest` with it.
+# Guards every build/push target: an empty VERSION would tag images `:-amd64`
+# and clobber `:latest`. VERSION is set by hand at the top of this file.
 check-version:
 	@test -n "$(VERSION)" || { \
-	  printf 'no git tag found — this repo'\''s tag names the release.\n'; \
-	  printf '  make tag VERSION=v0.1.0     (annotate + push)\n'; \
-	  printf '  make release VERSION=v0.1.0 (or pass one explicitly)\n'; \
+	  printf 'VERSION is empty — set it at the top of the Makefile,\n'; \
+	  printf 'or pass one: make docker VERSION=v0.2.0\n'; \
 	  exit 1; }
 
 # arm64 on an amd64 host is emulated, and the emulators are not registered by

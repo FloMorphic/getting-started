@@ -101,15 +101,18 @@ thing*. This repository is the entry point:
 curl -fsSL https://raw.githubusercontent.com/FloMorphic/getting-started/main/install.sh | bash
 ```
 
-Docker and the Compose v2 plugin are the only prerequisites. The script asks four
-things and does the rest:
+Docker and the Compose v2 plugin are the only prerequisites. The script pulls the
+published, baked image and asks only a couple of things:
 
 | It asks | Because |
 | --- | --- |
 | **Install directory** | where the compose stacks and the database land |
 | **Platform: the one already running, or a new one?** | FloMorphic is a product *on* the Inflowenger runtime. A new platform is installed by [the Inflowenger installer](https://github.com/Inflowenger/getting-started) itself — one source of truth, not a copy |
-| **Image: pull, or build from source?** | pull the published image, or `--build` a local one from the repos |
-| **Ports** | the canvas (`8090`) and the API (`8026`) |
+| **Advanced options (optional)** | override the ports (canvas `8090`, API `8026`) and the `PLUGINS_REF` the container builds the plugin nodes from |
+
+Building an image is a maintainer job, not an install-time one — the installer
+always pulls. To build one yourself, `make build` / `make release` (see the
+[Makefile](./Makefile)).
 
 The builtin plugin nodes are not one of the questions: they are what the canvas's
 stock nodes run as, so the container always clones and builds them. `PLUGINS_ENABLED=0`
@@ -121,10 +124,10 @@ unattended run) — see the header of [`install.sh`](./install.sh).
 ```
 <install dir>/
 ├── platform/          Infra + Fractal        (only when it installs one for you)
-├── inspector/         inflow-inspector       (only if you opt in)
+├── inspector/         inflow-inspector       (only with INSTALL_INSPECTOR=1)
 └── flomorphic/
     ├── docker-compose.yml
-    ├── .env           image ref, ports, refs, and the shared API Secret Key
+    ├── .env           image ref, ports, plugin ref, and the shared API Secret Key
     └── data/          the SQLite database — workflows, contexts, prompts, vectors
 ```
 
@@ -133,14 +136,15 @@ When it finishes: the canvas on **http://localhost:8090**, the API on
 
 ```bash
 cd <install dir>/flomorphic
-docker compose logs -f          # follow the first boot (the default image compiles on start)
+docker compose logs -f          # follow the first boot (it builds the plugin nodes once)
 docker compose down             # stop
 docker compose up -d            # start again
 ```
 
-The canvas, the API and the plugin nodes ship as **one image**, and the published
-default builds itself on first start. Why both of those are true —
-and how to run your own plugin set — is in
+The canvas, the API and the plugin nodes ship as **one image**. The api and canvas
+are baked in, so it starts fast; only the plugin nodes are built on first start
+(once, cached on a volume). Why it is one container — and how to run your own
+plugin set — is in
 [Architecture → One container, on purpose](./docs/architecture.md#one-container-on-purpose).
 
 ### Running from source
