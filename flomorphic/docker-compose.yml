@@ -68,10 +68,18 @@ services:
       - flomorphic-src:/src
       # Built plugin-node binaries (+ a .ref stamp of PLUGINS_REPO@PLUGINS_REF).
       # The baked image ships api + canvas but NOT the plugins, so the entrypoint
-      # compiles them at first start; persisting them here means that happens once
-      # per repo@ref instead of on every container recreate. Changing
+      # compiles them at first start; persisting them means that happens once per
+      # repo@ref instead of on every container recreate. Changing
       # PLUGINS_REPO/PLUGINS_REF invalidates the stamp and triggers one rebuild.
-      - flomorphic-plugins:/app/plugins
+      #
+      # A bind mount into the install directory (default ./plugins, next to
+      # ./data) rather than a named volume, so the compiled binaries sit in a
+      # known, selectable place you can inspect, back up or wipe by hand. Point
+      # FLOMORPHIC_PLUGINS_DIR elsewhere (e.g. an absolute path on a bigger disk)
+      # to relocate them. NOT bound to /src: that volume also carries the baked
+      # seed (builtins.json) the entrypoint reads for PLUGIN_IDs, and a bind mount
+      # would shadow it — so plugin SOURCES + the Go cache stay in a named volume.
+      - ${FLOMORPHIC_PLUGINS_DIR:-./plugins}:/app/plugins
     ports:
       # The canvas — and everything the browser needs, via nginx.
       - "${FLOMORPHIC_PORT:-8090}:80"
@@ -100,5 +108,6 @@ networks:
     external: true
 
 volumes:
+  # Plugin sources + Go module cache only. The built binaries are a bind mount
+  # into the install directory (see FLOMORPHIC_PLUGINS_DIR above), not here.
   flomorphic-src:
-  flomorphic-plugins:

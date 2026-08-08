@@ -45,6 +45,8 @@
 #                       the canvas + API alone (see `make run`).
 #   PLUGINS_REPO        plugin repo cloned by the container  (default: FloMorphic/builtin-plugins)
 #   PLUGINS_REF         branch/tag for it                    (default: main)
+#   FLOMORPHIC_PLUGINS_DIR  host dir for the built plugin binaries, bind-mounted
+#                       into the install dir next to ./data  (default: ./plugins)
 #   GOPROXY             Go module proxy for the container's plugin build
 #                       (default: image default). Set a mirror where the default
 #                       CDN is blocked, e.g. GOPROXY=https://goproxy.cn,direct.
@@ -73,6 +75,12 @@ PLUGINS_ENABLED="${PLUGINS_ENABLED:-1}"
 AUTH_ENABLED="${AUTH_ENABLED:-false}"
 PLUGINS_REPO="${PLUGINS_REPO:-https://github.com/FloMorphic/builtin-plugins.git}"
 PLUGINS_REF="${PLUGINS_REF:-main}"
+# Where the container's compiled plugin-node binaries land — a bind mount into
+# the install directory (next to ./data) rather than a Docker-managed named
+# volume, so "built once per repo@ref" sits in a known place you can inspect,
+# back up or wipe. Relative paths resolve against flomorphic/ (the compose dir);
+# set an absolute path to put them on a different disk.
+FLOMORPHIC_PLUGINS_DIR="${FLOMORPHIC_PLUGINS_DIR:-./plugins}"
 # Inherited from the caller's shell when set, so a machine already configured for
 # a Go mirror needs nothing extra here. Left empty, the container itself probes the
 # default Go proxy at start and falls back to a mirror if this network blocks it
@@ -294,6 +302,13 @@ fi
 # ── write the stack ───────────────────────────────────────────────────────────
 step "Writing the FloMorphic stack -> $FLOMORPHIC_DIR/flomorphic"
 mkdir -p "$FLOMORPHIC_DIR/flomorphic/data"
+# The plugin-binary bind mount must exist before `up`, or Docker creates it
+# root-owned. Relative paths hang off the compose dir; absolute ones are taken
+# as-is (a user pointing at a bigger disk).
+case "$FLOMORPHIC_PLUGINS_DIR" in
+  /*) mkdir -p "$FLOMORPHIC_PLUGINS_DIR" ;;
+  *)  mkdir -p "$FLOMORPHIC_DIR/flomorphic/${FLOMORPHIC_PLUGINS_DIR#./}" ;;
+esac
 
 # The compose file is a single source of truth — taken from this checkout when
 # there is one, fetched from the repo otherwise. Every image ref and port in it
@@ -327,6 +342,7 @@ fi
   printf 'PLUGINS_ENABLED=%s\n'         "$PLUGINS_ENABLED"
   printf 'PLUGINS_REPO=%s\n'            "$PLUGINS_REPO"
   printf 'PLUGINS_REF=%s\n'             "$PLUGINS_REF"
+  printf 'FLOMORPHIC_PLUGINS_DIR=%s\n'  "$FLOMORPHIC_PLUGINS_DIR"
   printf 'PLUGINS=\n'
   printf 'GOPROXY=%s\n'                 "$GOPROXY"
 } > "$FLOMORPHIC_DIR/flomorphic/.env"
@@ -348,7 +364,7 @@ step "Starting FloMorphic"
 ( cd "$FLOMORPHIC_DIR/flomorphic" && $DC pull --quiet 2>/dev/null || true )
 info "the published image is baked (api + canvas compiled in), so it starts fast."
 info "the FIRST start builds the plugin nodes once, which takes a couple of minutes;"
-info "later starts reuse them from a volume."
+info "later starts reuse them from $FLOMORPHIC_PLUGINS_DIR (in the install dir)."
 if ! ( cd "$FLOMORPHIC_DIR/flomorphic" && $DC up -d ); then
   printf '\n'
   die "\`$DC up -d\` failed — see the error above."
