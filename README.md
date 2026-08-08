@@ -15,7 +15,7 @@ FloMorphic — the first product built end-to-end on [Inflowenger](https://inflo
 curl -fsSL https://raw.githubusercontent.com/FloMorphic/getting-started/main/install.sh | bash
 ```
 
-Docker is the only prerequisite; the canvas comes up on http://localhost:8090.
+Docker is the only prerequisite; the canvas comes up on http://localhost:8088.
 Full details in [Install](#install).
 
 ---
@@ -108,7 +108,7 @@ published, baked image and asks only a couple of things:
 | --- | --- |
 | **Install directory** | where the compose stacks and the database land |
 | **Platform: the one already running, or a new one?** | FloMorphic is a product *on* the Inflowenger runtime. A new platform is installed by [the Inflowenger installer](https://github.com/Inflowenger/getting-started) itself — one source of truth, not a copy |
-| **Advanced options (optional)** | override the ports (canvas `8090`, API `8026`) and the `PLUGINS_REF` the container builds the plugin nodes from |
+| **Advanced options (optional)** | override the ports (canvas `8088`, API `8026`) and the `PLUGINS_REF` the container builds the plugin nodes from |
 
 Building an image is a maintainer job, not an install-time one — the installer
 always pulls. To build one yourself, `make build` / `make release` (see the
@@ -131,7 +131,7 @@ unattended run) — see the header of [`install.sh`](./install.sh).
     └── data/          the SQLite database — workflows, contexts, prompts, vectors
 ```
 
-When it finishes: the canvas on **http://localhost:8090**, the API on
+When it finishes: the canvas on **http://localhost:8088**, the API on
 **http://localhost:8026**, Infra on **http://localhost:8022**.
 
 ```bash
@@ -196,11 +196,11 @@ mode actually means.
 | --- | --- | --- |
 | Infra API | `8022` | `8022` |
 | NATS | `4222` (monitoring `8222`) | same |
-| FloMorphic canvas | `5173` (Vite dev server) | **`8090`** — and the API behind it on `/api` |
+| FloMorphic canvas | `5173` (Vite dev server) | **`8088`** — and the API behind it on `/api` |
 | FloMorphic API | `8025` | `8026` on the host, `8025` inside the container |
 | inflow-inspector | `8080` (panel) · `8025` (its API) | same |
 
-> The installed canvas and API sit on `8090`/`8026` rather than `5173`/`8025` so a
+> The installed canvas and API sit on `8088`/`8026` rather than `5173`/`8025` so a
 > FloMorphic install and an inflow-inspector install can run side by side.
 
 ### Still on the roadmap

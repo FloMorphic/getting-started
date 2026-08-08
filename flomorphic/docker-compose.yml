@@ -15,7 +15,7 @@
 #   cp .env.example .env      # set INFLOW_INFRA_JWT_SECRET = the platform's
 #                             # API_JWT_SECRET (Infra's API Secret Key)
 #   docker compose up -d
-#   open http://localhost:8090
+#   open http://localhost:8088
 #
 name: flomorphic
 
@@ -82,7 +82,7 @@ services:
       - ${FLOMORPHIC_PLUGINS_DIR:-./plugins}:/app/plugins
     ports:
       # The canvas — and everything the browser needs, via nginx.
-      - "${FLOMORPHIC_PORT:-8090}:80"
+      - "${FLOMORPHIC_PORT:-8088}:80"
       # The API, published directly for curl/scripts/other tools. Not needed by
       # the canvas. Defaults to 8026 so it never collides with inflow-inspector-api
       # on 8025.

@@ -37,7 +37,7 @@
 #   IMAGE_NS            Docker Hub namespace                 (default: mehdishokohi)
 #   IMAGE_TAG           tag for the pulled image             (default: latest)
 #   FLOMORPHIC_IMAGE    full image ref, overrides NS/TAG     (default: $IMAGE_NS/flomorphic:$IMAGE_TAG)
-#   FLOMORPHIC_PORT     host port for the canvas             (default: 8090)
+#   FLOMORPHIC_PORT     host port for the canvas             (default: 8088)
 #   FLOMORPHIC_API_PORT host port for the API                (default: 8026)
 #   PLUGINS_ENABLED     1/0 — run the builtin plugin nodes   (default: 1)
 #                       Not prompted for: the builtin nodes are part of the
@@ -69,7 +69,7 @@ INSTALL_INSPECTOR="${INSTALL_INSPECTOR:-0}"
 IMAGE_NS="${IMAGE_NS:-mehdishokohi}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
 FLOMORPHIC_IMAGE="${FLOMORPHIC_IMAGE:-}"
-FLOMORPHIC_PORT="${FLOMORPHIC_PORT:-8090}"
+FLOMORPHIC_PORT="${FLOMORPHIC_PORT:-8088}"
 FLOMORPHIC_API_PORT="${FLOMORPHIC_API_PORT:-8026}"
 PLUGINS_ENABLED="${PLUGINS_ENABLED:-1}"
 AUTH_ENABLED="${AUTH_ENABLED:-false}"

@@ -117,7 +117,7 @@ drew on day one is the thing that runs in production, not a sketch of it.
 The installed stack puts the canvas, the API and the plugin nodes in **one image**:
 
 ```
-     browser ──► :8090 ─── nginx ──┬── /            the canvas (static SPA)
+     browser ──► :8088 ─── nginx ──┬── /            the canvas (static SPA)
                                    ├── /api/*  ───► flomorphic-api  :8025
                                    └── /ws/*   ───►      "          (log stream)
                                                           │

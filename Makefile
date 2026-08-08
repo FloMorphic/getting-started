@@ -79,7 +79,7 @@ BUILDER ?=
 LOCAL_IMAGE ?= flomorphic:local
 
 # Host port for `make run`.
-PORT ?= 8090
+PORT ?= 8088
 
 DOCKERFILE := docker/Dockerfile.flomorphic
 
