@@ -35,6 +35,9 @@ ARG WAPP_REPO=https://github.com/FloMorphic/morph-wapp.git
 ARG WAPP_REF=main
 ARG PLUGINS_REPO=https://github.com/FloMorphic/builtin-plugins.git
 ARG PLUGINS_REF=main
+# The version string shown in the canvas UI. Named for the product image, so the
+# Makefile passes its VERSION here; empty leaves the app's own 'dev' fallback.
+ARG APP_VERSION=
 
 # Go module proxy, overridable because the default CDN is not reachable
 # everywhere: proxy.golang.org redirects module zips to storage.googleapis.com,
@@ -94,6 +97,7 @@ RUN set -eu; mkdir -p /out/plugins; \
 FROM node:22-alpine AS wapp-build
 ARG WAPP_REPO
 ARG WAPP_REF
+ARG APP_VERSION
 # Relative base: every API call is same-origin and nginx routes it, so this build
 # is not tied to any host name. See docker/nginx.conf.tmpl.
 ARG VITE_API_BASE_URL=/api
@@ -102,7 +106,7 @@ RUN git clone --depth 1 -b "$WAPP_REF" "$WAPP_REPO" /src/wapp \
  || { rm -rf /src/wapp; git clone --depth 1 "$WAPP_REPO" /src/wapp; }
 WORKDIR /src/wapp
 RUN pnpm install --frozen-lockfile
-RUN VITE_API_BASE_URL="$VITE_API_BASE_URL" pnpm build
+RUN VITE_API_BASE_URL="$VITE_API_BASE_URL" VITE_APP_VERSION="$APP_VERSION" pnpm build
 
 # ── runtime ───────────────────────────────────────────────────────────────────
 #

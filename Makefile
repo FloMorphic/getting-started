@@ -92,6 +92,7 @@ BUILD_ARGS := \
 	--build-arg WAPP_REF=$(WAPP_REF) \
 	--build-arg PLUGINS_REPO=$(PLUGINS_REPO) \
 	--build-arg PLUGINS_REF=$(PLUGINS_REF) \
+	--build-arg APP_VERSION=$(VERSION) \
 	$(if $(IMAGE_GOPROXY),--build-arg GOPROXY=$(IMAGE_GOPROXY),)
 
 .DEFAULT_GOAL := help
