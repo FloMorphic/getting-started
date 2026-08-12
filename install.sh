@@ -46,6 +46,7 @@
 #   REPO_RAW / REPO_REF raw base URL + ref the compose file is fetched from
 #   PLATFORM_INSTALLER  URL of the Inflowenger platform installer
 #   ASSUME_YES          1 — accept all defaults, no prompts  (default: 0)
+#   EULA_ACCEPT         1 — accept the Inflowenger EULA non-interactively (default: prompted)
 #
 # Flags:  --yes  same as ASSUME_YES=1
 #
@@ -70,6 +71,8 @@ REPO_RAW="${REPO_RAW:-https://raw.githubusercontent.com/FloMorphic/getting-start
 REPO_REF="${REPO_REF:-main}"
 PLATFORM_INSTALLER="${PLATFORM_INSTALLER:-https://raw.githubusercontent.com/Inflowenger/getting-started/main/install.sh}"
 ASSUME_YES="${ASSUME_YES:-0}"
+EULA_ACCEPT="${EULA_ACCEPT:-0}"
+EULA_URL="${EULA_URL:-https://github.com/Inflowenger/getting-started/blob/main/EULA.md}"
 
 for arg in "$@"; do
   case "$arg" in
@@ -175,6 +178,28 @@ ok "docker + compose available ($DC); downloader: $DL"
 printf '\n%s  FloMorphic installer%s\n' "$B" "$RST"
 printf '%s  canvas + API + builtin plugin nodes, on the Inflowenger runtime%s\n' "$DIM" "$RST"
 
+# ── license (EULA) ────────────────────────────────────────────────────────────
+# FloMorphic runs on the Inflowenger platform, so the Inflowenger EULA applies.
+# The platform installer is delegated to with ASSUME_YES=1 (which would auto-accept
+# its gate), so agreement must be captured here.
+step "License"
+info "FloMorphic runs on Inflowenger, which is proprietary software — free for"
+info "personal, non-commercial use (limited edition). Commercial, high-value or"
+info "high-volume use needs a separate commercial or unlimited license. Instances"
+info "report completed-process counts and basic metadata (version, cluster id, IP)"
+info "for automatic licensing and fair-use analytics — no process content is sent."
+info "Full EULA: ${B}${EULA_URL}${RST}"
+if [ "$EULA_ACCEPT" != "1" ] && [ "$ASSUME_YES" != "1" ]; then
+  if have_tty; then
+    [ "$(ask 'Type "I AGREE" to accept the EULA and continue' '')" = "I AGREE" ] \
+      || die "EULA not accepted."
+  else
+    die "EULA not accepted — re-run with EULA_ACCEPT=1 (or ASSUME_YES=1). See $EULA_URL"
+  fi
+fi
+EULA_ACCEPT=1   # carried into the delegated platform installer below
+ok "EULA accepted."
+
 # ── 1. where ──────────────────────────────────────────────────────────────────
 step "Configuration"
 FLOMORPHIC_DIR="$(ask "Install directory" "$FLOMORPHIC_DIR")"
@@ -237,6 +262,7 @@ if [ "$PLATFORM_MODE" = new ]; then
   FRACTAL_TAGS="$FRACTAL_TAGS" \
   FRACTAL_NAME="$FRACTAL_NAME" \
   INSTALL_INSPECTOR="$INSTALL_INSPECTOR" \
+  EULA_ACCEPT="$EULA_ACCEPT" \
   ASSUME_YES=1 \
     bash "$PLATFORM_SH" || die "the platform installer failed — fix that first, then re-run this script."
   rm -f "$PLATFORM_SH"
