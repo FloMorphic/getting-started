@@ -202,6 +202,29 @@ mode actually means.
 > The installed canvas and API sit on `8088`/`8026` rather than `5173`/`8025` so a
 > FloMorphic install and an inflow-inspector install can run side by side.
 
+### Drive it from Claude (MCP)
+
+The FloMorphic API is **itself an MCP server** — mounted at `/mcp`, on by default.
+Every entity the canvas edits (workflows, contexts, prompts, memory stores,
+triggers, human tasks, runs) is an MCP tool over the same call path the web app
+uses, so an AI client can drive FloMorphic directly: **design a workflow, save it,
+run it, and read back what it produced** — including the same AI-authoring brain the
+canvas's [AI Build](https://inflowenger.com/blog/flomorphic-claims-walkthrough)
+dialog uses.
+
+Point any MCP client at the endpoint — no bridge for clients that speak Streamable
+HTTP:
+
+```bash
+# Claude Code
+claude mcp add --transport http flomorphic http://localhost:8026/mcp
+```
+
+Claude Desktop connects by URL (**Settings → Connectors → Add custom connector**,
+`http://localhost:8026/mcp`) or, on classic builds, via the `mcp-remote` bridge.
+→ **[FloMorphic over MCP](./docs/mcp.md)** — the full tool catalog, per-client setup
+(Claude Desktop, Claude Code, Cursor), auth, and a first design-run-inspect session.
+
 ### Still on the roadmap
 
 - [x] **Local dev wiring** — API + Vite + plugin nodes against a running platform,
@@ -224,6 +247,7 @@ mode actually means.
 | [docs/ai-harness.md](./docs/ai-harness.md) | Virtual functions, context, memory stores, out-of-model reasoning — and how RAG, agent loops, tool use and guardrails map onto them. |
 | [docs/architecture.md](./docs/architecture.md) | Process topology, attaching a system you already run, scaling out, and the container design. |
 | [docs/development.md](./docs/development.md) | Running the API, the canvas and the plugin nodes from source against an installed platform — the two variables that bind them, credentials, debugger configs, failure modes. |
+| [docs/mcp.md](./docs/mcp.md) | Driving FloMorphic from an MCP client (Claude Desktop, Claude Code, Cursor) — the `/mcp` endpoint, per-client setup, the `flo_*` tool catalog and designer prompt, and auth. |
 
 **In the component repositories** — which layer answers your question:
 
