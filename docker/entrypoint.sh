@@ -56,6 +56,15 @@ die()  { printf '[flomorphic] error: %s\n' "$*"; exit 1; }
 : "${DB_SOURCE:=/data/flomorphic.db}"
 export PORT DB_SOURCE
 
+# Where the minted builtin-plugins credential is cached, and how hard we try to
+# mint a fresh one before falling back to it. The credential does not expire, so
+# a copy from a previous boot is enough to start the builtin nodes on a host
+# reboot where Infra is not answering yet (the containers come up together and
+# flomorphic-api's own connect to Infra is still retrying). Kept in the /data
+# volume, mode 600, beside the DB. See start_plugins.
+: "${PLUGIN_CRED_CACHE:=$(dirname "$DB_SOURCE")/.builtin-cred}"
+: "${PLUGIN_CRED_MINT_RETRIES:=5}"   # mint attempts (2s apart) before using cache
+
 # ── child process bookkeeping ─────────────────────────────────────────────────
 procs=""   # space-separated "<pid>:<name>"
 
@@ -212,12 +221,40 @@ start_plugins() {
         warn "Put the platform's API Secret Key in flomorphic/.env and recreate the container."
     fi
 
+    # Prefer a freshly minted credential (it self-heals an Infra account-seed
+    # rotation), retrying briefly because on a reboot Infra usually comes up a few
+    # seconds after this container. Only when every attempt fails do we fall back
+    # to the cached copy from a previous boot — enough to start the nodes, which
+    # then connect once Infra's NATS is reachable.
     log "minting the shared builtin-plugins credential"
-    _cred="$(mint_plugin_cred || true)"
-    if [ -z "$_cred" ]; then
+    _cred=""
+    _try=1
+    while [ "$_try" -le "$PLUGIN_CRED_MINT_RETRIES" ]; do
+        _cred="$(mint_plugin_cred 2>/dev/null || true)"
+        [ -n "$_cred" ] && break
+        _try=$((_try + 1))
+        [ "$_try" -le "$PLUGIN_CRED_MINT_RETRIES" ] && sleep 2
+    done
+
+    if [ -n "$_cred" ]; then
+        # The minted credential does not expire, so a cached copy lets a future
+        # boot start the nodes before Infra answers. Write mode 600 in the volume.
+        if ( umask 077; printf '%s' "$_cred" > "$PLUGIN_CRED_CACHE" ) 2>/dev/null; then
+            log "cached the builtin credential at $PLUGIN_CRED_CACHE"
+        else
+            warn "could not write the credential cache at $PLUGIN_CRED_CACHE"
+        fi
+    else
         warn "could not mint a plugin credential — is Infra reachable at $INFLOW_INFRA_API?"
-        warn "continuing without the builtin plugin nodes; LLM/MCP nodes will not execute."
-        return 0
+        if [ -r "$PLUGIN_CRED_CACHE" ]; then
+            _cred="$(cat "$PLUGIN_CRED_CACHE" 2>/dev/null || true)"
+        fi
+        if [ -n "$_cred" ]; then
+            warn "using the cached builtin credential from $PLUGIN_CRED_CACHE — the plugin nodes will connect once Infra's NATS is up."
+        else
+            warn "no cached credential to fall back on; continuing without the builtin plugin nodes; LLM/MCP nodes will not execute."
+            return 0
+        fi
     fi
     _infra="$(plugin_infra_url)"
     log "plugin NATS endpoint: $_infra"

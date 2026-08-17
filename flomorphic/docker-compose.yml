@@ -27,7 +27,21 @@ services:
   flomorphic:
     image: ${FLOMORPHIC_IMAGE:-mehdishokohi/flomorphic:latest}
     container_name: flomorphic
+    # Always come back after a crash or a host reboot. There is no cross-stack
+    # `depends_on` to make this wait for Infra (Infra lives in a separate compose
+    # project, reachable only over the shared inflow_net network), so boot-order
+    # resilience is handled at runtime instead: the API retries its Infra
+    # connection with backoff, and the entrypoint starts the builtin nodes from a
+    # cached credential until Infra answers. This policy is what re-launches the
+    # container on reboot so those mechanisms get their chance.
     restart: unless-stopped
+    # Real PID 1 for a container that supervises several processes (nginx, the
+    # API and the plugin nodes): tini reaps zombies and forwards signals, so a
+    # `docker stop` reaches every child rather than only the entrypoint shell.
+    init: true
+    # Room for the entrypoint's teardown: on TERM it signals its children, waits,
+    # then KILLs stragglers — a little over the 10s default keeps stops clean.
+    stop_grace_period: 20s
     environment:
       # ── runtime wiring ────────────────────────────────────────────────────
       # Infra's REST API. The NATS endpoint the API and the plugins connect to
