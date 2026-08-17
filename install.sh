@@ -361,10 +361,13 @@ if ! ( cd "$FLOMORPHIC_DIR/flomorphic" && $DC up -d ); then
   die "\`$DC up -d\` failed — see the error above."
 fi
 
-info "Waiting for the canvas to answer on http://localhost:$FLOMORPHIC_PORT ..."
+info "Waiting for the canvas to answer on http://127.0.0.1:$FLOMORPHIC_PORT ..."
 ready=0
 for _ in $(seq 1 180); do
-  if curl -fsS "http://localhost:$FLOMORPHIC_PORT/healthz" >/dev/null 2>&1; then ready=1; break; fi
+  # --noproxy '*' and 127.0.0.1 (not the name) so this local probe is never sent
+  # through an http_proxy/https_proxy the shell may export — a proxy would route
+  # the loopback request out and this loop would wait forever on a healthy stack.
+  if curl -fsS --noproxy '*' "http://127.0.0.1:$FLOMORPHIC_PORT/healthz" >/dev/null 2>&1; then ready=1; break; fi
   # Fail fast if the container gave up instead of waiting out the whole timeout.
   if ! docker ps --format '{{.Names}}' | grep -qx 'flomorphic'; then
     warn "the flomorphic container is not running — check its logs:"
