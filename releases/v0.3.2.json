@@ -1,0 +1,12 @@
+{
+  "version": "v0.3.2",
+  "date": "2026-08-24",
+  "image": "mehdishokohi/flomorphic:v0.3.2",
+  "components": {
+    "api": { "repo": "morph-api", "ref": "main", "sha": "18bd3f0129675ec2c4e755e397174aed40b1bda7", "short": "18bd3f0" },
+    "wapp": { "repo": "morph-wapp", "ref": "main", "sha": "00a3b5d7c845498451ed50a707508ae61867ccde", "short": "00a3b5d" },
+    "plugins": { "repo": "builtin-plugins", "ref": "main", "sha": "470d258cc5e49fc76a7935291795525d352c7a1b", "short": "470d258" },
+    "plugin-sdk": { "repo": "inflow-plugin-sdk", "ref": "main", "sha": "96d24b9893e2feabd44278b0490372f02a6f350e", "short": "96d24b9" },
+    "node-sdk": { "repo": "node-plugin-sdk", "ref": "main", "sha": "f50c1017e649036b62c695ccbe22d0c7a7262db5", "short": "f50c101" }
+  }
+}

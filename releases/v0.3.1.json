@@ -1,0 +1,13 @@
+{
+  "version": "v0.3.1",
+  "date": "2026-08-20",
+  "image": "mehdishokohi/flomorphic:v0.3.1",
+  "note": "Baseline offset. v0.3.1 was cut manually before changelog tracking existed; these are the component commits it was built from, recorded retroactively so v0.3.2 diffs against them. SHAs are the last pre-open-connector commit in each repo.",
+  "components": {
+    "api": { "repo": "morph-api", "ref": "main", "sha": "bef49d6", "short": "bef49d6" },
+    "wapp": { "repo": "morph-wapp", "ref": "main", "sha": "0bf5e86", "short": "0bf5e86" },
+    "plugins": { "repo": "builtin-plugins", "ref": "main", "sha": "470d258cc5e49fc76a7935291795525d352c7a1b", "short": "470d258" },
+    "plugin-sdk": { "repo": "inflow-plugin-sdk", "ref": "main", "sha": "c62c95c", "short": "c62c95c" },
+    "node-sdk": { "repo": "node-plugin-sdk", "ref": "main", "sha": "4d5ee65", "short": "4d5ee65" }
+  }
+}

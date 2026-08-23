@@ -101,7 +101,7 @@ BUILD_ARGS := \
 	build run stop \
 	docker-amd64 docker-arm64 docker \
 	docker-push-amd64 docker-push-arm64 docker-push push-latest release \
-	tag inspect clean
+	tag inspect clean changelog changelog-lock
 
 help: ## Show this help
 	@printf 'FloMorphic image targets — %s\n\n' "$(IMAGE_NAME)"
@@ -110,6 +110,12 @@ help: ## Show this help
 	@printf '\nversion: %s   refs: api=%s wapp=%s plugins=%s\n' \
 	  "$(if $(VERSION),$(VERSION),none - see the tag target)" \
 	  "$(API_REF)" "$(WAPP_REF)" "$(PLUGINS_REF)"
+
+changelog: check-version ## Draft the CHANGELOG section for VERSION (diffs components from the last offset)
+	@scripts/gen-changelog.sh $(VERSION)
+
+changelog-lock: check-version ## Same, and save releases/$(VERSION).json as the offset for the next release
+	@scripts/gen-changelog.sh $(VERSION) --write-lock
 
 version: ## Print the version and the tags a release would push
 	@printf 'VERSION       %s\n' "$(if $(VERSION),$(VERSION),none)"
