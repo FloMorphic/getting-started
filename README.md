@@ -46,6 +46,19 @@ code distributed across services — it is a workflow graph over living context,
 changeable by an operator without a redeploy. FloMorphic is that thesis applied to
 the AI layer.
 
+**The discipline is flow engineering — an architecture, not a prompting trick.**
+Not flow in the linear-automation sense the word usually carries (mailbox → step →
+step → send), but flow engineering in the sense the technique was reaching for:
+breaking work into states and transitions, with the model as a *bounded
+participant* and control on a layer you can see. FloMorphic makes that the shape of
+the system rather than a pattern you re-hand-assemble per project. Underneath, that
+shape is a **durable cyclic graph** — nodes are capabilities, edges are the
+decisions the model is permitted to make, a loop is just an edge pointing backward
+plus a condition, and the whole process iterates over one durable context object
+that survives a wait, an approval, or a crash. You don't write and redeploy code;
+you engineer the flow, and the graph runtime executes it over living context.
+→ [Concepts](./docs/concepts.md)
+
 **And it is open source.** The runtime primitives, the compiler seam, the API, the
 canvas, and the LLM and MCP plugin nodes are all readable, forkable and
 self-hostable. There is no hosted-only capability holding the interesting part

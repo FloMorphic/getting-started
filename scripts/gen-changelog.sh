@@ -48,6 +48,7 @@ WAPP_DIR="${WAPP_DIR:-$here/../flomorphic-wapp}"
 PLUGINS_DIR="${PLUGINS_DIR:-$here/../builtin-plugins}"
 PSDK_DIR="${PSDK_DIR:-$here/../../inflow-plugin-sdk}"
 NSDK_DIR="${NSDK_DIR:-$here/../../node-plugin-sdk}"
+COOKBOOK_DIR="${COOKBOOK_DIR:-$here/../flow-cookbook}"
 
 # component key -> "on-disk dir|display name". Every FloMorphic repo whose commits
 # should roll up into a product release goes here. A missing checkout is skipped
@@ -58,8 +59,9 @@ declare -A COMPONENTS=(
   [plugins]="$PLUGINS_DIR|builtin-plugins"
   [plugin-sdk]="$PSDK_DIR|inflow-plugin-sdk"
   [node-sdk]="$NSDK_DIR|node-plugin-sdk"
+  [cookbook]="$COOKBOOK_DIR|flow-cookbook"
 )
-ORDER=(api wapp plugins plugin-sdk node-sdk)
+ORDER=(api wapp plugins plugin-sdk node-sdk cookbook)
 
 # --- find the previous release lock (highest version-sorted *.json) -----------
 prev_lock=""
@@ -96,6 +98,7 @@ group_commits() { # stdin: "<subject>" lines -> grouped markdown on stdout
   [ -n "$feats" ]  && printf '  **Added / Changed**\n%s'   "$feats"
   [ -n "$fixes" ]  && printf '  **Fixed**\n%s'             "$fixes"
   [ -n "$chores" ] && printf '  **Maintenance**\n%s'       "$chores"
+  return 0  # never let an empty last group fail the function under `set -e`
 }
 
 today="$(date +%Y-%m-%d)"

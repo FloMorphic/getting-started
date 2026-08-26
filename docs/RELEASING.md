@@ -13,10 +13,17 @@ that landed across *all* of them into one product changelog:
 | Builtin plugins   | `github.com/FloMorphic/builtin-plugins` | `../builtin-plugins`      | `main`     |
 | Plugin SDK (Go)   | `github.com/FloMorphic/inflow-plugin-sdk` | `../../inflow-plugin-sdk` | `main`   |
 | Plugin SDK (node) | `github.com/FloMorphic/node-plugin-sdk` | `../../node-plugin-sdk`   | `main`     |
+| Cookbook          | `github.com/FloMorphic/flow-cookbook`   | `../flow-cookbook`        | not baked  |
 
 The changelog reports the whole team's activity for the release window regardless
 of which repo (or, in future, which teammate) the commits came from. Add a repo to
 the roll-up by adding it to `COMPONENTS` in `scripts/gen-changelog.sh`.
+
+Not every rolled-up repo is baked into the image. `flow-cookbook` ships example
+flows and docs on its own, but its commits are still worth reporting per release,
+so it is tracked in the roll-up (and its offset recorded in the lock) while staying
+out of the **Baked from** table in `CHANGELOG.md` and out of the `make release`
+build args.
 
 Because the components carry no per-release tags, a product changelog can't be
 produced by diffing tags. Instead **each release records the exact commit each repo

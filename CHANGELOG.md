@@ -16,7 +16,69 @@ component from the last recorded offset to its current `main`.
 ## [Unreleased]
 
 _Run `make changelog VERSION=<next>` to draft this section from the commits landed
-across all repos since v0.3.2._
+across all repos since v0.3.3._
+
+## [v0.3.3] — 2026-08-26
+
+A follow-up to v0.3.2 focused on the node-authoring experience and flow
+reliability: a **clear-history** option for LLM and MCP nodes so looping flows can
+start each pass fresh, a **prompt expander** for editing long prompts, more
+reliable AI-designed flows, a **security fix** that stops workflow exports from
+leaking settings-profile tokens, and fixes to process-stop and the plugin build.
+This release also begins tracking the new `flow-cookbook` repo in the changelog
+roll-up.
+
+### Added
+
+- **Clear-history option for LLM and MCP nodes.** A new `clear_history` toggle in
+  the node settings drawer makes a node discard the conversation carried on its
+  scope and re-seed its init messages (the system/user template) on every run. In
+  a looping or resumed flow this starts each pass from a fresh init instead of
+  accumulating history across passes. _(morph-wapp, builtin-plugins)_
+- **Prompt expander on every prompt input.** An "Expand" affordance beside the
+  prompt boxes (LLM / MCP drawers and the human-in-the-loop settings) opens the
+  same text in a roomy dialog, so long init prompts can be read and edited
+  comfortably; edits sync live with the small textarea. _(morph-wapp)_
+
+### Changed
+
+- **More reliable AI-designed flows.** The flow-designer preamble now spells out
+  strict-JSON rules (single-quoted JS string literals, `\n`-encoded newlines) and
+  the `rule`-vs-`js` branching contract (only a `rule` node may branch), so the
+  model's generated workflows parse and import cleanly instead of failing on
+  malformed JSON or a `js` node with handlers. _(morph-api)_
+
+### Security
+
+- **Workflow exports no longer leak settings-profile secrets.** A node's settings
+  profile now leaves an exported flow by *reference* only (`settingsId`); its
+  resolved values — which hold the provider API token — are dropped on export
+  instead of being written into the shared file. On import the id is re-resolved
+  against the target install's own profiles, and a node whose profile is missing
+  is flagged for the designer to pick one. _(morph-wapp)_
+
+### Fixed
+
+- **Stopping a scheduled or already-finished process is now handled correctly.**
+  `StopWorkflow` previously assumed a live engine run: cancelling a *scheduled*
+  row (recorded but not yet dispatched) errored, and the run would still fire at
+  its scheduled time. A scheduled row is now simply marked `stopped` and the
+  scheduler re-armed so it never fires; a stop on an already terminal row is a
+  harmless no-op. _(morph-api)_
+- **Plugin build no longer fails when `bin/` is missing.** The Go branch of the
+  plugin install/build script now creates the output directory (`mkdir -p bin`)
+  before `go build`, so building a Go plugin extension from a clean checkout
+  succeeds. _(morph-api)_
+
+### Baked from
+
+| Component           | Ref    | Commit    |
+| ------------------- | ------ | --------- |
+| `morph-api`         | `main` | `62f66df` |
+| `morph-wapp`        | `main` | `a914559` |
+| `builtin-plugins`   | `main` | `e31fa4a` |
+| `inflow-plugin-sdk` | `main` | `96d24b9` |
+| `node-plugin-sdk`   | `main` | `f50c101` |
 
 ## [v0.3.2] — 2026-08-24
 
@@ -70,5 +132,6 @@ across the API, the canvas and both plugin SDKs.
 | `inflow-plugin-sdk` | `main` | `96d24b9` |
 | `node-plugin-sdk`   | `main` | `f50c101` |
 
-[Unreleased]: https://github.com/FloMorphic/getting-started/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/FloMorphic/getting-started/compare/v0.3.3...HEAD
+[v0.3.3]: https://github.com/FloMorphic/getting-started/compare/v0.3.2...v0.3.3
 [v0.3.2]: https://github.com/FloMorphic/getting-started/releases/tag/v0.3.2
