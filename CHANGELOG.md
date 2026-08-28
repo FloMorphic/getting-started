@@ -16,7 +16,62 @@ component from the last recorded offset to its current `main`.
 ## [Unreleased]
 
 _Run `make changelog VERSION=<next>` to draft this section from the commits landed
-across all repos since v0.3.3._
+across all repos since v0.3.4._
+
+## [v0.3.4] — 2026-08-28
+
+A small follow-up to v0.3.3: a **JSONPath probe** in the context inspector so a
+designer can see exactly which values a node's `{{$.path}}` template resolves
+against a real run, **per-plugin icons and colors** so imported plugin nodes are
+visually distinct on the canvas instead of all wearing the same generic plug, and
+a **more robust workflow stop** that reconciles against Infra's trace instead of
+surfacing a misleading error when a run has already finished.
+
+### Added
+
+- **JSONPath probe on the context inspector.** The full-page context view now
+  carries a read-only query box: type the same `{{$.path}}` expression a node uses
+  in its template and see, against the real context document, exactly which values
+  resolve — the scope that node reads from. Supports child/index selectors, `*`
+  wildcards, `..` recursive descent, slices and unions (filters are out of scope by
+  design). It never mutates the context. _(morph-wapp)_
+
+### Changed
+
+- **Plugin nodes render their own icons and colors.** Every plugin action used to
+  show the same generic plug glyph on a same-hue tile. `Icon` now resolves
+  Iconify-style names (`mdi:database` / `mdi-database`) from the bundled Material
+  Design Icons set — lazy-loaded as its own async chunk so the ~3 MB collection
+  never blocks cold load and stays offline — and the action's declared icon is
+  threaded through to the node. Each imported plugin also derives a stable color
+  from its id (hashed hue), with an optional per-class shade so a multi-service
+  plugin's sub-groups (e.g. google's docs / sheets / drive) tell themselves apart
+  while staying one family; the color is applied to node, palette and drawer
+  accents and to the Extensions/Registry cards. _(morph-wapp)_
+
+### Fixed
+
+- **Stopping an already-finished workflow no longer errors.** A fractal engine
+  instance forgets a run's pid the instant the run ends, so `StopWorkflow` could
+  answer with a misleading "no pid to stop" error while the row still read
+  `running` (a `proc.finish` that never made it back on the event log). Stop now
+  consults Infra's week-long trace before surfacing that error: if the trace shows
+  the run finished, the row is reconciled to its real terminal status and the stop
+  is a satisfied no-op; if the trace still shows it live, the genuine error is
+  surfaced unchanged; and a row the engine and Infra both have no record of is
+  best-effort marked `stopped` so it never sits as `running` forever. Infra being
+  unreachable is never treated as a finish — the original error is passed through.
+  _(morph-api)_
+
+### Baked from
+
+| Component           | Ref    | Commit    |
+| ------------------- | ------ | --------- |
+| `morph-api`         | `main` | `f063ae7` |
+| `morph-wapp`        | `main` | `7fa6826` |
+| `builtin-plugins`   | `main` | `e31fa4a` |
+| `inflow-plugin-sdk` | `main` | `96d24b9` |
+| `node-plugin-sdk`   | `main` | `f50c101` |
 
 ## [v0.3.3] — 2026-08-26
 
@@ -132,6 +187,7 @@ across the API, the canvas and both plugin SDKs.
 | `inflow-plugin-sdk` | `main` | `96d24b9` |
 | `node-plugin-sdk`   | `main` | `f50c101` |
 
-[Unreleased]: https://github.com/FloMorphic/getting-started/compare/v0.3.3...HEAD
+[Unreleased]: https://github.com/FloMorphic/getting-started/compare/v0.3.4...HEAD
+[v0.3.4]: https://github.com/FloMorphic/getting-started/compare/v0.3.3...v0.3.4
 [v0.3.3]: https://github.com/FloMorphic/getting-started/compare/v0.3.2...v0.3.3
 [v0.3.2]: https://github.com/FloMorphic/getting-started/releases/tag/v0.3.2

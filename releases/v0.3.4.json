@@ -1,0 +1,13 @@
+{
+  "version": "v0.3.4",
+  "date": "2026-08-28",
+  "image": "mehdishokohi/flomorphic:v0.3.4",
+  "components": {
+    "api": { "repo": "morph-api", "ref": "main", "sha": "f063ae79fbcd19b074ad3055c96afd303c9b3030", "short": "f063ae7" },
+    "wapp": { "repo": "morph-wapp", "ref": "main", "sha": "7fa682615d29b02bdc8b47861370fae072a2d972", "short": "7fa6826" },
+    "plugins": { "repo": "builtin-plugins", "ref": "main", "sha": "e31fa4ab2d25706eb3e8182e4baae810744f4329", "short": "e31fa4a" },
+    "plugin-sdk": { "repo": "inflow-plugin-sdk", "ref": "main", "sha": "96d24b9893e2feabd44278b0490372f02a6f350e", "short": "96d24b9" },
+    "node-sdk": { "repo": "node-plugin-sdk", "ref": "main", "sha": "f50c1017e649036b62c695ccbe22d0c7a7262db5", "short": "f50c101" },
+    "cookbook": { "repo": "flow-cookbook", "ref": "main", "sha": "034a8c5f44c119b9ab51544c39eaa6d6dbfc2756", "short": "034a8c5" }
+  }
+}
