@@ -16,7 +16,51 @@ component from the last recorded offset to its current `main`.
 ## [Unreleased]
 
 _Run `make changelog VERSION=<next>` to draft this section from the commits landed
-across all repos since v0.3.4._
+across all repos since v0.3.5._
+
+## [v0.3.5] — 2026-08-29
+
+A small maintenance release: the **workflow stop** path now recognizes the engine's
+graceful "accepted" reply instead of surfacing it as an error, plugins built on the
+**node SDK** can no longer crash when a stopped run leaves their requests
+unanswered, and the cookbook gains a **Qdrant vector-data migration** example.
+
+### Added
+
+- **Qdrant vector-data migration flow.** A new `qdrant-migrate` cookbook example
+  (flow, README and screenshots) walks through adding a Qdrant collection and
+  transferring vector data into it. _(flow-cookbook)_
+
+### Fixed
+
+- **Stopping a workflow no longer reports a false error.** The fractal engine
+  answers a stop request with a graceful `202/OK` (`{"data":"OK"}`), which
+  inflow-fusion cannot decode into a pid-shaped response and returns as a sonic
+  mismatch error. `StopWorkflow` now reads that specific decode error as "stop
+  accepted": it records the stop and lets the run's own finish reconcile the final
+  status, instead of surfacing the mismatch as a failure. Bundles the
+  inflow-fusion `v0.3.1 → v0.3.3` bump this relies on. _(morph-api)_
+- **A stopped workflow can no longer crash a node-SDK plugin.** When a user stops a
+  run, the plugin's NATS requests are left with no responders; `send()` used to
+  throw, surfacing as an unhandled rejection that took down the whole plugin. It now
+  mirrors the Go SDK — logs the failing call and returns `undefined` — and every
+  `cmd*` helper guards against that empty reply, so a stopped run winds down quietly.
+  Retry diagnostics now include the subject and body of the failing call.
+  _(node-plugin-sdk, 0.1.7)_
+
+### Maintenance
+
+- Build fix on the canvas. _(morph-wapp)_
+
+### Baked from
+
+| Component           | Ref    | Commit    |
+| ------------------- | ------ | --------- |
+| `morph-api`         | `main` | `eb5145e` |
+| `morph-wapp`        | `main` | `40cbdb9` |
+| `builtin-plugins`   | `main` | `e31fa4a` |
+| `inflow-plugin-sdk` | `main` | `96d24b9` |
+| `node-plugin-sdk`   | `main` | `a051113` |
 
 ## [v0.3.4] — 2026-08-28
 
@@ -187,7 +231,8 @@ across the API, the canvas and both plugin SDKs.
 | `inflow-plugin-sdk` | `main` | `96d24b9` |
 | `node-plugin-sdk`   | `main` | `f50c101` |
 
-[Unreleased]: https://github.com/FloMorphic/getting-started/compare/v0.3.4...HEAD
+[Unreleased]: https://github.com/FloMorphic/getting-started/compare/v0.3.5...HEAD
+[v0.3.5]: https://github.com/FloMorphic/getting-started/compare/v0.3.4...v0.3.5
 [v0.3.4]: https://github.com/FloMorphic/getting-started/compare/v0.3.3...v0.3.4
 [v0.3.3]: https://github.com/FloMorphic/getting-started/compare/v0.3.2...v0.3.3
 [v0.3.2]: https://github.com/FloMorphic/getting-started/releases/tag/v0.3.2
