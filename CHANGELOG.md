@@ -16,7 +16,36 @@ component from the last recorded offset to its current `main`.
 ## [Unreleased]
 
 _Run `make changelog VERSION=<next>` to draft this section from the commits landed
-across all repos since v0.3.5._
+across all repos since v0.3.6._
+
+## [v0.3.6] — 2026-08-30
+
+A single-fix release: **builtin nodes regained their access to plugin services**.
+The previous release narrowed how plugin credentials are minted and, as a
+side effect, broke every builtin node's ability to reply on its own inbox — this
+release corrects the permission logic so open credentials are left untouched.
+
+### Fixed
+
+- **Builtin nodes can talk to plugin services again.** When minting a plugin's
+  credential, `mintCred` unconditionally added `flomorphic.svc.>` to the publish
+  allow-list. For an **open** (multi-plugin) credential that allow-list is meant to
+  be empty — NATS reads an empty allow-list as "allow all" — so adding one subject
+  flipped it to "allow *only* that subject", stripping the plugin of its ability to
+  respond on `_INBOX.>` and breaking every builtin node. The svc reach is now added
+  only for **strict** credentials, which enumerate their publish subjects
+  explicitly; open credentials are left as "allow all" and can already reach
+  `flomorphic.svc.>`. _(morph-api)_
+
+### Baked from
+
+| Component           | Ref    | Commit    |
+| ------------------- | ------ | --------- |
+| `morph-api`         | `main` | `829bb14` |
+| `morph-wapp`        | `main` | `40cbdb9` |
+| `builtin-plugins`   | `main` | `e31fa4a` |
+| `inflow-plugin-sdk` | `main` | `96d24b9` |
+| `node-plugin-sdk`   | `main` | `a051113` |
 
 ## [v0.3.5] — 2026-08-29
 
@@ -231,7 +260,8 @@ across the API, the canvas and both plugin SDKs.
 | `inflow-plugin-sdk` | `main` | `96d24b9` |
 | `node-plugin-sdk`   | `main` | `f50c101` |
 
-[Unreleased]: https://github.com/FloMorphic/getting-started/compare/v0.3.5...HEAD
+[Unreleased]: https://github.com/FloMorphic/getting-started/compare/v0.3.6...HEAD
+[v0.3.6]: https://github.com/FloMorphic/getting-started/compare/v0.3.5...v0.3.6
 [v0.3.5]: https://github.com/FloMorphic/getting-started/compare/v0.3.4...v0.3.5
 [v0.3.4]: https://github.com/FloMorphic/getting-started/compare/v0.3.3...v0.3.4
 [v0.3.3]: https://github.com/FloMorphic/getting-started/compare/v0.3.2...v0.3.3
