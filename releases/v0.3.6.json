@@ -3,8 +3,8 @@
   "date": "2026-08-30",
   "image": "mehdishokohi/flomorphic:v0.3.6",
   "components": {
-    "api": { "repo": "morph-api", "ref": "main", "sha": "829bb1445d7288b7b046e2b642f08d8e5b4d6648", "short": "829bb14" },
-    "wapp": { "repo": "morph-wapp", "ref": "main", "sha": "40cbdb9378decc6aef3a798b57819d9aae6b1641", "short": "40cbdb9" },
+    "api": { "repo": "morph-api", "ref": "main", "sha": "c4f19b2a240705fe1ccd317e175ef5ccfbe1060b", "short": "c4f19b2" },
+    "wapp": { "repo": "morph-wapp", "ref": "main", "sha": "ed331fc2cd9b719d475ad8d9be39a63272353e2c", "short": "ed331fc" },
     "plugins": { "repo": "builtin-plugins", "ref": "main", "sha": "e31fa4ab2d25706eb3e8182e4baae810744f4329", "short": "e31fa4a" },
     "plugin-sdk": { "repo": "inflow-plugin-sdk", "ref": "main", "sha": "96d24b9893e2feabd44278b0490372f02a6f350e", "short": "96d24b9" },
     "node-sdk": { "repo": "node-plugin-sdk", "ref": "main", "sha": "a05111381dac3e644f458c4132d805002489d460", "short": "a051113" },

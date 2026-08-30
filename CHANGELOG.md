@@ -20,10 +20,47 @@ across all repos since v0.3.6._
 
 ## [v0.3.6] — 2026-08-30
 
-A single-fix release: **builtin nodes regained their access to plugin services**.
-The previous release narrowed how plugin credentials are minted and, as a
-side effect, broke every builtin node's ability to reply on its own inbox — this
-release corrects the permission logic so open credentials are left untouched.
+Headlined by a **vector store you can wire up entirely from the canvas**: pick an
+embedding provider, load its real model list with your own key, set the output
+dimension, then **write** records (text plus metadata) and **read** them back by
+top-K with an optional similarity floor and metadata filtering. This release also
+restores **builtin nodes' access to plugin services**, which the previous release
+had narrowed by accident.
+
+### Added
+
+- **Vector store with a live model-provider picker.** The add-vector-store form
+  now offers a real catalog of embedding providers — **OpenAI, Google Gemini,
+  Cohere, Mistral, Voyage AI**, plus an **OpenAI-compatible custom base URL** —
+  instead of a free-text guess. Choosing a provider and supplying its key loads
+  the embedding models that key can actually use: the browser posts to
+  `POST /memory/embedding-models`, which proxies each provider's list-models API
+  server-side (via `svc.ListEmbeddingModels`) so the key never leaves the backend
+  and CORS is never in the way. Voyage (no list API) falls back to its published
+  line-up. Each model carries a sensible **default output dimension** that
+  pre-fills the size field, which stays editable because several models
+  (`text-embedding-3-*`, `gemini-embedding-001`, `embed-v4.0`…) support more than
+  one size. _(morph-api, morph-wapp)_
+- **Top-K and minimum-score vector queries.** A vector search now takes an
+  optional `minScore` alongside `topK`, and every hit comes back with a
+  normalized **similarity `score`** (higher is nearer) derived from the raw
+  distance regardless of the store's metric — `1 − distance` clamped to `[0,1]`
+  for cosine, `1/(1+distance)` for L2. Because both are monotonic in distance, a
+  search can rank and threshold on the intuitive `0–1` scale and stop at the first
+  sub-threshold hit. The store settings expose top-K and score in the UI.
+  _(morph-api, morph-wapp)_
+- **Vector write mode with metadata, and metadata as a read filter.** A vector
+  store node now runs in **write** or **read** mode. In write mode the text to
+  embed comes from the node's own `text` parameter — a `{{$.path}}` placeholder
+  the engine resolves against the flow context before the call (with fallbacks to
+  a `text`/`content` field or a scope that resolved to a bare string) — and you
+  attach **metadata** as key/value rows whose values are themselves
+  jsonpath-resolvable, so a record can carry live fields from the run. Those rows
+  are flattened onto the payload as root-level `meta.<key>` entries (the only
+  place the engine resolves placeholders) and reassembled handler-side. On a
+  **read**, the same metadata rows become an **equality filter** that restricts
+  which records a similarity search can match, so a store can be partitioned by
+  arbitrary fields at query time. _(morph-api, morph-wapp)_
 
 ### Fixed
 
@@ -41,8 +78,8 @@ release corrects the permission logic so open credentials are left untouched.
 
 | Component           | Ref    | Commit    |
 | ------------------- | ------ | --------- |
-| `morph-api`         | `main` | `829bb14` |
-| `morph-wapp`        | `main` | `40cbdb9` |
+| `morph-api`         | `main` | `c4f19b2` |
+| `morph-wapp`        | `main` | `ed331fc` |
 | `builtin-plugins`   | `main` | `e31fa4a` |
 | `inflow-plugin-sdk` | `main` | `96d24b9` |
 | `node-plugin-sdk`   | `main` | `a051113` |
