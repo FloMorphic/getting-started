@@ -174,13 +174,47 @@ mint_plugin_cred() {
     | jq -er '.data.cred'
 }
 
-# The plugin SDK prefixes nats:// itself, so this must stay host:port. NATS lives
-# alongside Infra's REST API, so the host comes straight off INFLOW_INFRA_API.
+# The plugin SDK prefixes nats:// itself, so this must stay host:port. NATS is
+# Infra's second address, published alongside its REST API, so when nothing is
+# set the host comes straight off INFLOW_INFRA_API with the NATS port swapped in.
+# A remapped NATS port or a separate address is what PLUGIN_INFRA_URL is for.
 plugin_infra_url() {
     if [ -n "$PLUGIN_INFRA_URL" ]; then printf '%s' "$PLUGIN_INFRA_URL"; return; fi
     _host="$(printf '%s' "$INFLOW_INFRA_API" \
         | sed -e 's|^[a-zA-Z][a-zA-Z0-9+.-]*://||' -e 's|/.*$||' -e 's|:[0-9]*$||')"
     printf '%s:%s' "$_host" "$PLUGIN_NATS_PORT"
+}
+
+# go-plugin-sdk (through v0.2.2) runs url.Parse over INFRA_URL before dialling.
+# A bare "host:port" only survives that because Go reads the host as a URL
+# scheme — which works for "inflow-infra:4222" and fails for anything not
+# starting with a letter:
+#
+#     parse "172.28.0.1:4222": first path segment in URL cannot contain colon
+#
+# That is every install pointed at an existing platform by IP. Give such an
+# endpoint a name in /etc/hosts and hand the nodes the name, which parses and
+# resolves to the same address. A hostname endpoint is passed through untouched.
+#
+# SDK v0.2.3 parses the bare form correctly, so this is a compatibility shim:
+# drop it once every baked plugin binary is built against v0.2.3 or newer.
+: "${PLUGIN_NATS_ALIAS:=infra-nats}"
+nats_host_alias() { # <host:port> -> <host-or-alias:port>  (stdout is the result; log to stderr)
+    _hp="$1"
+    _h="${_hp%:*}"
+    _p="${_hp##*:}"
+    case "$_h" in
+        [A-Za-z]*) printf '%s' "$_hp"; return ;;   # a name the SDK can parse
+    esac
+    _h="${_h#[}"; _h="${_h%]}"                     # bare IPv6 arrives bracketed
+    if ! grep -q "[[:space:]]${PLUGIN_NATS_ALIAS}\$" /etc/hosts 2>/dev/null; then
+        if ! printf '%s\t%s\n' "$_h" "$PLUGIN_NATS_ALIAS" >> /etc/hosts 2>/dev/null; then
+            warn "could not add the $PLUGIN_NATS_ALIAS alias to /etc/hosts — the plugin nodes may refuse $_hp" >&2
+            printf '%s' "$_hp"; return
+        fi
+    fi
+    log "aliased the NATS address $_h as $PLUGIN_NATS_ALIAS (the plugin SDK cannot parse a bare IP endpoint)" >&2
+    printf '%s:%s' "$PLUGIN_NATS_ALIAS" "$_p"
 }
 
 # Resolve one plugin folder's inflowv1 PLUGIN_ID. Precedence:
@@ -256,7 +290,7 @@ start_plugins() {
             return 0
         fi
     fi
-    _infra="$(plugin_infra_url)"
+    _infra="$(nats_host_alias "$(plugin_infra_url)")"
     log "plugin NATS endpoint: $_infra"
 
     if [ -z "$(find "$PLUGIN_BIN_DIR" -maxdepth 1 -type f 2>/dev/null | head -n1)" ]; then

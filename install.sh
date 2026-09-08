@@ -27,6 +27,9 @@
 #   FLOMORPHIC_DIR      install directory                    (default: current directory)
 #   PLATFORM_MODE       existing | new                       (default: detected, else prompted)
 #   INFLOW_INFRA_API    Infra REST API base URL              (default: http://inflow-infra:8022)
+#   PLUGIN_INFRA_URL    Infra NATS endpoint, host:port       (default: <INFLOW_INFRA_API host>:4222)
+#                       Infra answers on TWO addresses — the REST API (8022) and
+#                       NATS (4222) — and the plugin nodes need the second one.
 #   API_JWT_SECRET      Infra API Secret Key / shared secret (default: generated for a new platform)
 #   FRACTAL_TAGS        tags for a new platform's Fractal    (default: default)
 #   FRACTAL_NAME        container name for that Fractal      (default: fractal-1)
@@ -56,6 +59,8 @@ set -euo pipefail
 FLOMORPHIC_DIR="${FLOMORPHIC_DIR:-$PWD}"
 PLATFORM_MODE="${PLATFORM_MODE:-}"
 INFLOW_INFRA_API="${INFLOW_INFRA_API:-}"
+PLUGIN_INFRA_URL="${PLUGIN_INFRA_URL:-}"
+INFRA_NATS_PORT="${INFRA_NATS_PORT:-4222}"
 API_JWT_SECRET="${API_JWT_SECRET:-}"
 FRACTAL_TAGS="${FRACTAL_TAGS:-default}"
 FRACTAL_NAME="${FRACTAL_NAME:-fractal-1}"
@@ -138,6 +143,23 @@ confirm() { # <prompt> <default y|n> -> exit status
   IFS= read -r reply </dev/tty || reply=""
   reply="${reply:-$def}"
   case "$reply" in [Yy]*) return 0;; *) return 1;; esac
+}
+
+# Infra is reached on two addresses: the REST API (INFLOW_INFRA_API, :8022) and
+# NATS (PLUGIN_INFRA_URL, :4222). Only the API URL is asked for in full; the NATS
+# endpoint defaults to the same host on the NATS port, which is how the platform
+# stack publishes it.
+infra_host() { # <url or host[:port]> -> <host>
+  printf '%s' "$1" | sed -e 's|^[a-zA-Z][a-zA-Z0-9+.-]*://||' -e 's|/.*$||' -e 's|:[0-9]*$||'
+}
+
+# A bare "host:port" is what the API and the plugin SDK want, and http:// is what
+# a REST base URL needs — accept either spelling for the API answer.
+with_http() { # <url or host[:port]> -> <url>
+  case "$1" in
+    ""|*://*) printf '%s' "$1" ;;
+    *)        printf 'http://%s' "$1" ;;
+  esac
 }
 
 gen_secret() {
@@ -272,10 +294,22 @@ if [ "$PLATFORM_MODE" = new ]; then
 
   # Installed here, so FloMorphic reaches it by container name on inflow_net.
   INFLOW_INFRA_API="${INFLOW_INFRA_API:-http://inflow-infra:8022}"
+  PLUGIN_INFRA_URL="${PLUGIN_INFRA_URL:-inflow-infra:$INFRA_NATS_PORT}"
   ok "platform installed under $FLOMORPHIC_DIR/platform"
 else
   step "Using an existing Inflowenger platform"
-  INFLOW_INFRA_API="$(ask "Infra API base URL (as seen FROM the container)" "${INFLOW_INFRA_API:-http://inflow-infra:8022}")"
+  # The container reaches Infra by the name it can resolve, which depends on
+  # where Infra runs. Both compose stacks inject host.docker.internal, so the
+  # host case has a stable name and needs no gateway IP.
+  info "${DIM}Infra in a container on inflow_net -> http://inflow-infra:8022${RST}"
+  info "${DIM}Infra on this host (or any host port) -> http://host.docker.internal:8022${RST}"
+  INFLOW_INFRA_API="$(with_http "$(ask "Infra API base URL (as seen FROM the container)" "${INFLOW_INFRA_API:-http://inflow-infra:8022}")")"
+  # Infra answers on two addresses and both are needed: the REST API above mints
+  # the plugin credential, and NATS carries every node's traffic. They share a
+  # host in the stock platform stack (8022 and 4222 are published together), so
+  # the second is offered derived from the first rather than asked for blind.
+  PLUGIN_INFRA_URL="$(ask "Infra NATS endpoint, host:port (as seen FROM the container)" \
+    "${PLUGIN_INFRA_URL:-$(infra_host "$INFLOW_INFRA_API"):$INFRA_NATS_PORT}")"
   # Both halves of the connection are asked for, always: an address without the
   # matching key gets a canvas that cannot run anything. A key discovered above
   # is offered as an editable default rather than assumed, since it may belong to
@@ -340,6 +374,7 @@ fi
 {
   printf 'FLOMORPHIC_IMAGE=%s\n'        "$FLOMORPHIC_IMAGE"
   printf 'INFLOW_INFRA_API=%s\n'        "$INFLOW_INFRA_API"
+  printf 'PLUGIN_INFRA_URL=%s\n'        "$PLUGIN_INFRA_URL"
   printf 'INFLOW_INFRA_JWT_SECRET=%s\n' "$API_JWT_SECRET"
   printf 'AUTH_ENABLED=%s\n'            "$AUTH_ENABLED"
   printf 'API_JWT_SECRET=\n'
@@ -410,6 +445,7 @@ fi
 
 printf '\n%s  Platform%s\n' "$B" "$RST"
 info "Infra API            $INFLOW_INFRA_API"
+info "Infra NATS           ${PLUGIN_INFRA_URL:-derived from the API host}"
 if [ "$PLATFORM_MODE" = new ]; then
   info "Infra portal         http://localhost:8022"
   info "Fractal              $FRACTAL_NAME  (tags: $FRACTAL_TAGS)"

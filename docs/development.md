@@ -59,7 +59,8 @@ on a breakpoint — without the others noticing.
 
 | Variable | What it does |
 | --- | --- |
-| `INFLOW_INFRA_API` | Infra's REST base URL — accounts, resources, credential minting. **The NATS endpoint is derived from it:** the same hostname on port `4222`. It is the only address you set. Empty ⇒ the API serves CRUD only. |
+| `INFLOW_INFRA_API` | Infra's REST base URL — accounts, resources, credential minting. **The NATS endpoint is derived from it:** the same hostname on port `4222`, which is the only address you set whenever the platform publishes both together. Empty ⇒ the API serves CRUD only. |
+| `PLUGIN_INFRA_URL` | The NATS endpoint itself, as `host:port` and no scheme, when deriving it is wrong — a remapped NATS port, or Infra reachable on a different address than its REST API. Set, it is also what a generated plugin `.env` hands out as `INFRA_URL`. |
 | `INFLOW_INFRA_JWT_SECRET` | The platform's **API Secret Key** (`API_JWT_SECRET` in the platform's `.env`). The API signs its calls to Infra with it, so it must match character for character — a wrong value fails at connect, not at first use. |
 
 The value of `INFLOW_INFRA_API` depends on where the process runs, because it is

@@ -44,11 +44,17 @@ services:
     stop_grace_period: 20s
     environment:
       # ── runtime wiring ────────────────────────────────────────────────────
-      # Infra's REST API. The NATS endpoint the API and the plugins connect to
-      # is derived from this host (:4222), so it is the only address to set.
-      # Empty ⇒ the API serves CRUD only: you can design and save workflows,
-      # but Run does nothing and no plugin node is credentialed.
+      # Infra's REST API — where the plugin credential is minted and runs are
+      # dispatched from. Empty ⇒ the API serves CRUD only: you can design and
+      # save workflows, but Run does nothing and no plugin node is credentialed.
       INFLOW_INFRA_API: ${INFLOW_INFRA_API:-http://inflow-infra:8022}
+      # Infra's NATS endpoint, as host:port (no scheme — the plugin SDK prefixes
+      # nats:// itself). This is Infra's OTHER address: the REST API answers on
+      # 8022, NATS on 4222, and every plugin node talks over the latter. Left
+      # empty it is derived from the INFLOW_INFRA_API host on port 4222, which is
+      # right whenever the platform stack publishes both together. Set it when
+      # they differ — a NATS port remapped on the host, or a separate address.
+      PLUGIN_INFRA_URL: ${PLUGIN_INFRA_URL:-}
       # Infra's API Secret Key — the same value as the platform's API_JWT_SECRET.
       # Not enforced here: with it empty (or INFLOW_INFRA_API empty) the stack
       # still comes up CRUD-only, which is a legitimate standalone mode. The
@@ -81,6 +87,17 @@ services:
       - "${FLOMORPHIC_API_PORT:-8026}:8025"
     networks:
       - inflow_net
+    # Make the Docker host reachable by name from inside the container. On Linux
+    # `host.docker.internal` does not exist unless it is injected like this
+    # (it resolves to the bridge gateway). Needed whenever Infra — or an LLM, an
+    # MCP server, a database a node calls — runs on the host rather than as a
+    # container on inflow_net. Prefer the name over the gateway IP: the IP
+    # changes whenever the network is recreated, and it is what a node URL or
+    # these two variables should say:
+    #   INFLOW_INFRA_API=http://host.docker.internal:8022
+    #   PLUGIN_INFRA_URL=host.docker.internal:4222
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1/healthz"]
       # Everything is baked (api, canvas and plugin binaries), so startup is just
