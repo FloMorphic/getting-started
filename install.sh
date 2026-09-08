@@ -225,12 +225,15 @@ if [ -z "$PLATFORM_MODE" ]; then
 fi
 
 # Pre-fill the secret from a platform/.env written by a previous run, so the
-# common case (platform installed here) needs no copy-paste.
+# common case (platform installed here) needs no copy-paste. This is a default,
+# not an answer: the `existing` branch below still prompts with it, because that
+# file describes the platform installed HERE, which need not be the one being
+# pointed at — and Infra mints a fresh secret whenever it comes up without one.
 if [ -z "$API_JWT_SECRET" ] && [ -f "$FLOMORPHIC_DIR/platform/.env" ]; then
   PRIOR_SECRET="$(grep -E '^API_JWT_SECRET=' "$FLOMORPHIC_DIR/platform/.env" | head -n1 | cut -d= -f2- || true)"
   if [ -n "${PRIOR_SECRET:-}" ]; then
     API_JWT_SECRET="$PRIOR_SECRET"
-    ok "read the API Secret Key from $FLOMORPHIC_DIR/platform/.env"
+    ok "read an API Secret Key from $FLOMORPHIC_DIR/platform/.env"
   fi
 fi
 
@@ -273,9 +276,17 @@ if [ "$PLATFORM_MODE" = new ]; then
 else
   step "Using an existing Inflowenger platform"
   INFLOW_INFRA_API="$(ask "Infra API base URL (as seen FROM the container)" "${INFLOW_INFRA_API:-http://inflow-infra:8022}")"
-  if [ -z "$API_JWT_SECRET" ]; then
-    info "FloMorphic authenticates to Infra with its API Secret Key (Infra prints it on"
-    info "first boot: \"API Secret Key is : ...\"; it is API_JWT_SECRET in platform/.env)."
+  # Both halves of the connection are asked for, always: an address without the
+  # matching key gets a canvas that cannot run anything. A key discovered above
+  # is offered as an editable default rather than assumed, since it may belong to
+  # a different platform than the address just given.
+  info "FloMorphic authenticates to Infra with its API Secret Key (Infra prints it on"
+  info "first boot: \"API Secret Key is : ...\"; it is API_JWT_SECRET in platform/.env)."
+  if [ -n "$API_JWT_SECRET" ]; then
+    info "${DIM}A key was found locally and is offered below — replace it if this Infra is a different one.${RST}"
+    API_JWT_SECRET="$(ask "API Secret Key" "$API_JWT_SECRET")"
+  else
+    info "${DIM}Paste with Ctrl+Shift+V (or right-click / Cmd+V) — Ctrl+V is not paste in a terminal.${RST}"
     API_JWT_SECRET="$(ask_secret "API Secret Key")"
   fi
   if [ -z "$API_JWT_SECRET" ]; then
