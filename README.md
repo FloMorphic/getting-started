@@ -287,7 +287,7 @@ Claude Desktop connects by URL (**Settings → Connectors → Add custom connect
 | **Infra** | runtime | Coordination + embedded NATS + credential minting. Everything starts here. |
 | **Fractal** | runtime | The execution engine. Attaches to Infra, walks compiled node maps. |
 | [`inflow-fusion`](https://github.com/Inflowenger/inflow-fusion) | SDK | The Go SDK: `InitBackend`, the `IInflowService` contract, typed node builders, `svcHandler`, scoped credentials, and the Vue Flow compiler. |
-| `go-plugin-sdk` · `node-plugin-sdk` | SDK | Build a plugin against the `inflowv1` protocol — actions, meta methods, settings forms, live progress. Go and Node/TypeScript, wire-identical: pick the language, not a different protocol. |
+| `go-plugin-sdk` · `node-plugin-sdk` · [`py-plugin-sdk`](https://pypi.org/project/inflowenger-plugin-sdk/) | SDK | Build a plugin against the `inflowv1` protocol — actions, meta methods, settings forms, live progress. Go, Node/TypeScript and Python, wire-identical: pick the language, not a different protocol. |
 | `inflow-inspector` + `inspector-api` | reference | The low-level developer panel: edit raw primitives, inspect contexts and running processes. The worked example of consuming the SDK. |
 | `flomorphic-api` (`morph-api`) | product | FloMorphic's backend: Go 1.26 + Fiber v3, SQLite + `sqlite-vec` via sqlc, the Vue Flow → primitive compiler, and the `svc.*` handlers backing store / HITL / continue nodes. |
 | `flomorphic-wapp` | product | The canvas: Vue 3 + Vite + TypeScript + Vue Flow + Tailwind v4 + Pinia. Runs standalone (browser-local) or connected. |

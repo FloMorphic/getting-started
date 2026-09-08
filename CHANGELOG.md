@@ -16,7 +16,101 @@ component from the last recorded offset to its current `main`.
 ## [Unreleased]
 
 _Run `make changelog VERSION=<next>` to draft this section from the commits landed
-across all repos since v0.3.6._
+across all repos since v0.3.7._
+
+## [v0.3.7] — 2026-09-08
+
+Two of FloMorphic's own AI nodes got more legible and more controllable this
+release: the **MCP node** now streams a turn-by-turn account of what the model is
+doing and lets you **raise its agentic-loop cap**, and the **LLM node** stops
+drowning the canvas in progress frames on token-streaming providers. Off the
+canvas, the **plugin SDK family gained a third language — Python — now published
+on PyPI**, and importing a flow now **tells you which plugin nodes you don't have
+installed** instead of failing quietly.
+
+### Added
+
+- **First public release of the Python plugin SDK.** `inflowenger-plugin-sdk` is
+  now on [PyPI](https://pypi.org/project/inflowenger-plugin-sdk/) (`pip install
+  inflowenger-plugin-sdk`, Python 3.11+) — the Python port of the Go SDK, speaking
+  the same `inflowv1` protocol wire-for-wire. Go stays the normative reference;
+  Node.js and Python track it. Not baked into the image; it ships on its own for
+  plugin authors. _(py-plugin-sdk)_
+- **Configurable MCP agentic-loop cap.** The MCP node's run body now takes an
+  optional `max_tool_turns`, exposed as a **Min tool turns** control in the MCP
+  settings drawer. The previous hard-coded limit of 8 becomes the default and the
+  floor — a node can raise the cap for longer agentic runs but never drop below
+  the default — so a model that keeps asking for tools still can't spin forever.
+  _(builtin-plugins, morph-wapp)_
+- **Live activity stream from the MCP node.** A `run` now narrates each turn as it
+  goes: a **`thinking`** frame while the model is being consulted (`consulting
+  <model> (turn N)`), a **`tools selected`** frame listing the batch the model
+  picked, then per-tool **`calling tool` / `tool done` / `tool failed`** frames.
+  The progress percentage ramps steadily toward — but never reaches — 100, which
+  the runtime reserves for "done". _(builtin-plugins)_
+- **Copy settings profiles between dialogs via the clipboard.** Both the node
+  settings and plugin onboarding dialogs now have **Export** and **Import**
+  buttons that move a profile's field values as JSON on the clipboard — export
+  copies whatever is on screen, import pastes it into the form's fields. Paste
+  only updates the on-screen fields; nothing is saved until you commit, and a
+  paste that isn't a JSON object is rejected with a readable message. _(morph-wapp)_
+- **Plugin credentials can be minted with extra environment variables.** A cred
+  request now takes an optional `env` list — upstream keys, endpoints, mode flags
+  — and the generated `.env` carries them alongside the minted credential instead
+  of leaving the plugin author to paste them in by hand. `PLUGIN_ID` and
+  `INFRA_CRED` are always emitted and can't be overridden; an `INFRA_URL` entry
+  is honoured, since the address this API reaches Infra on ("infra:4222" in
+  compose) is often not the one a plugin on someone's laptop can dial. _(morph-api)_
+
+### Changed
+
+- **Importing a flow now detects plugin nodes you don't have installed.** Instead
+  of a flow that quietly fails to run, the importer surfaces the missing plugin
+  nodes up front across the import, canvas and node UI, so you know what to install
+  before wiring it up. _(morph-wapp)_
+- **LLM node streaming is batched.** Token-streaming providers (OpenAI and the
+  like) emit one delta per token — 1000–2000+ chunks for a single long turn — and
+  the old one-chunk-one-frame path blew past the runtime's per-job send threshold.
+  A new frame batcher decouples the canvas update rate from the provider's chunk
+  granularity: it flushes on a word boundary after enough new text, on a hard
+  character cap (so a boundary-less token run still flushes), or on a minimum time
+  gap (so a slow stream stays live), and always shows the complete text before the
+  job finalizes. Coarse-chunk providers like Gemini are unaffected.
+  _(builtin-plugins)_
+- **stdio dropped from the MCP node's transport picker.** The MCP node is a
+  builtin that talks to a *remote* server, so it has no local process to speak
+  stdio with — the option could only ever be a dead end. Streamable HTTP, SSE and
+  WebSocket remain. _(morph-wapp)_
+
+### Fixed
+
+- **Re-syncing a plugin no longer breaks the flows already using it.** A sync used
+  to delete every derived palette row for a plugin and re-insert one per live
+  action, which handed each node a fresh id — and since a saved workflow stores
+  that id, every canvas pointing at the plugin was left with stale references
+  after a routine re-sync. Sync now reconciles instead: an action that already has
+  a row keeps it (matched on its method, falling back to its exact name so a
+  renamed method still finds its node) and is rewritten in place, an action with
+  no row gets a new one, and only rows no live action claimed are deleted — so a
+  dropped method still disappears from the palette. The sync result reports
+  `updated` alongside `added` and `removed`. _(morph-api)_
+
+### Maintenance
+
+- **Cookbook: a naive-RAG example flow.** A new end-to-end retrieval-augmented
+  flow (with readme) demonstrating the vector store landed in v0.3.6, updated to
+  match the new import behavior. Ships with `flow-cookbook`, not baked.
+  _(flow-cookbook)_
+
+### Baked from
+
+| Component           | Ref    | Commit    |
+| ------------------- | ------ | --------- |
+| `morph-api`         | `main` | `44111d4` |
+| `morph-wapp`        | `main` | `3882481` |
+| `builtin-plugins`   | `main` | `bc7c84e` |
+| `inflow-plugin-sdk` | `main` | `96d24b9` |
+| `node-plugin-sdk`   | `main` | `a051113` |
 
 ## [v0.3.6] — 2026-08-30
 
@@ -297,7 +391,8 @@ across the API, the canvas and both plugin SDKs.
 | `inflow-plugin-sdk` | `main` | `96d24b9` |
 | `node-plugin-sdk`   | `main` | `f50c101` |
 
-[Unreleased]: https://github.com/FloMorphic/getting-started/compare/v0.3.6...HEAD
+[Unreleased]: https://github.com/FloMorphic/getting-started/compare/v0.3.7...HEAD
+[v0.3.7]: https://github.com/FloMorphic/getting-started/compare/v0.3.6...v0.3.7
 [v0.3.6]: https://github.com/FloMorphic/getting-started/compare/v0.3.5...v0.3.6
 [v0.3.5]: https://github.com/FloMorphic/getting-started/compare/v0.3.4...v0.3.5
 [v0.3.4]: https://github.com/FloMorphic/getting-started/compare/v0.3.3...v0.3.4
