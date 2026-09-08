@@ -60,6 +60,7 @@ FLOMORPHIC_DIR="${FLOMORPHIC_DIR:-$PWD}"
 PLATFORM_MODE="${PLATFORM_MODE:-}"
 INFLOW_INFRA_API="${INFLOW_INFRA_API:-}"
 PLUGIN_INFRA_URL="${PLUGIN_INFRA_URL:-}"
+INFRA_API_PORT="${INFRA_API_PORT:-8022}"
 INFRA_NATS_PORT="${INFRA_NATS_PORT:-4222}"
 API_JWT_SECRET="${API_JWT_SECRET:-}"
 FRACTAL_TAGS="${FRACTAL_TAGS:-default}"
@@ -145,21 +146,78 @@ confirm() { # <prompt> <default y|n> -> exit status
   case "$reply" in [Yy]*) return 0;; *) return 1;; esac
 }
 
-# Infra is reached on two addresses: the REST API (INFLOW_INFRA_API, :8022) and
-# NATS (PLUGIN_INFRA_URL, :4222). Only the API URL is asked for in full; the NATS
-# endpoint defaults to the same host on the NATS port, which is how the platform
-# stack publishes it.
-infra_host() { # <url or host[:port]> -> <host>
-  printf '%s' "$1" | sed -e 's|^[a-zA-Z][a-zA-Z0-9+.-]*://||' -e 's|/.*$||' -e 's|:[0-9]*$||'
+# Infra answers on two addresses that differ only in port: the REST API
+# (INFLOW_INFRA_API, http://host:8022) and NATS (PLUGIN_INFRA_URL, host:4222 —
+# no scheme, the plugin SDK prefixes nats:// itself). The installer asks for one
+# address and spells both out from it, so "host:8022", "http://host:8022/" and a
+# bare "host" all land in .env the same way.
+
+# <authority> -> "<host> <port>", port empty when the answer carried none.
+split_hostport() {
+  local a="${1#*@}" h p                     # drop any user:pass@
+  case "$a" in
+    \[*\]:[0-9]*) h="${a%:*}"; p="${a##*:}" ;;   # [::1]:4222
+    \[*\])        h="$a";      p=""        ;;    # [::1]
+    *:[0-9]*)     h="${a%:*}"; p="${a##*:}" ;;   # host:4222
+    *)            h="$a";      p=""        ;;
+  esac
+  # A bare IPv6 typed without brackets ("fd00::1") splits wrong above; nothing
+  # after the last colon can be a port if what precedes it still has one.
+  case "$h" in [!\[]*:*) h="$a"; p="" ;; esac
+  printf '%s %s' "$h" "$p"
 }
 
-# A bare "host:port" is what the API and the plugin SDK want, and http:// is what
-# a REST base URL needs — accept either spelling for the API answer.
-with_http() { # <url or host[:port]> -> <url>
-  case "$1" in
-    ""|*://*) printf '%s' "$1" ;;
-    *)        printf 'http://%s' "$1" ;;
+# <url or host[:port][/path]> -> <scheme>://<host>:<port>[/path]
+normalize_api_url() {
+  local u sch rest auth path host port
+  u="$(printf '%s' "$1" | tr -d '[:space:]')"
+  [ -n "$u" ] || return 0
+  case "$u" in *://*) ;; *) u="http://$u" ;; esac
+  sch="${u%%://*}"; rest="${u#*://}"
+  # Only http(s) can carry a REST call; anything else is the NATS address pasted
+  # into the wrong prompt, which fails far more confusingly later than here.
+  case "$sch" in
+    http|https) ;;
+    *) warn "'$sch://' is not a REST scheme — reading it as http://" >&2; sch=http ;;
   esac
+  auth="${rest%%/*}"
+  case "$rest" in */*) path="/${rest#*/}" ;; *) path="" ;; esac
+  path="${path%/}"                          # no trailing slash to double up
+  read -r host port <<EOF
+$(split_hostport "$auth")
+EOF
+  # A port-less answer means Infra's default REST port — except behind https,
+  # where the address is a proxy already listening on 443.
+  if [ -z "$port" ] && [ "$sch" = http ]; then port="$INFRA_API_PORT"; fi
+  if [ -n "$port" ]; then printf '%s://%s:%s%s' "$sch" "$host" "$port" "$path"
+  else printf '%s://%s%s' "$sch" "$host" "$path"; fi
+}
+
+# <url or host[:port][/path]> -> <host>, no scheme, no port, no path.
+infra_host() {
+  local u auth host port
+  u="$(printf '%s' "$1" | tr -d '[:space:]')"
+  [ -n "$u" ] || return 0
+  u="${u#*://}"
+  auth="${u%%/*}"
+  read -r host port <<EOF
+$(split_hostport "$auth")
+EOF
+  printf '%s' "$host"
+}
+
+# <url or host[:port]> -> "<host>:<port>" for NATS: no scheme, no path, and the
+# NATS port unless the answer named one itself.
+normalize_nats_url() {
+  local u auth host port
+  u="$(printf '%s' "$1" | tr -d '[:space:]')"
+  [ -n "$u" ] || return 0
+  u="${u#*://}"                             # nats://host:4222 -> host:4222
+  auth="${u%%/*}"
+  read -r host port <<EOF
+$(split_hostport "$auth")
+EOF
+  printf '%s:%s' "$host" "${port:-$INFRA_NATS_PORT}"
 }
 
 gen_secret() {
@@ -303,13 +361,17 @@ else
   # host case has a stable name and needs no gateway IP.
   info "${DIM}Infra in a container on inflow_net -> http://inflow-infra:8022${RST}"
   info "${DIM}Infra on this host (or any host port) -> http://host.docker.internal:8022${RST}"
-  INFLOW_INFRA_API="$(with_http "$(ask "Infra API base URL (as seen FROM the container)" "${INFLOW_INFRA_API:-http://inflow-infra:8022}")")"
+  INFLOW_INFRA_API="$(normalize_api_url "$(ask "Infra API base URL (as seen FROM the container)" "${INFLOW_INFRA_API:-http://inflow-infra:8022}")")"
   # Infra answers on two addresses and both are needed: the REST API above mints
-  # the plugin credential, and NATS carries every node's traffic. They share a
-  # host in the stock platform stack (8022 and 4222 are published together), so
-  # the second is offered derived from the first rather than asked for blind.
-  PLUGIN_INFRA_URL="$(ask "Infra NATS endpoint, host:port (as seen FROM the container)" \
-    "${PLUGIN_INFRA_URL:-$(infra_host "$INFLOW_INFRA_API"):$INFRA_NATS_PORT}")"
+  # the plugin credential, and NATS carries every node's traffic. Same host, only
+  # the port differs (the platform stack publishes 8022 and 4222 together), so
+  # this is derived rather than asked — PLUGIN_INFRA_URL overrides it for the
+  # rare split, and INFRA_NATS_PORT for a remapped port.
+  if [ -n "$PLUGIN_INFRA_URL" ]; then
+    PLUGIN_INFRA_URL="$(normalize_nats_url "$PLUGIN_INFRA_URL")"
+  else
+    PLUGIN_INFRA_URL="$(infra_host "$INFLOW_INFRA_API"):$INFRA_NATS_PORT"
+  fi
   # Both halves of the connection are asked for, always: an address without the
   # matching key gets a canvas that cannot run anything. A key discovered above
   # is offered as an editable default rather than assumed, since it may belong to
