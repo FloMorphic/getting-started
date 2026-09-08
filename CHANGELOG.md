@@ -97,6 +97,9 @@ installed** instead of failing quietly.
 
 ### Maintenance
 
+- **Builtin plugin nodes build against Go plugin SDK v0.2.2.** All four modules
+  (`cast`, `http`, `llm`, `mcp`) bump their `inflow-plugin-sdk` dependency to
+  v0.2.2. _(builtin-plugins)_
 - **Cookbook: a naive-RAG example flow.** A new end-to-end retrieval-augmented
   flow (with readme) demonstrating the vector store landed in v0.3.6, updated to
   match the new import behavior. Ships with `flow-cookbook`, not baked.
@@ -108,7 +111,7 @@ installed** instead of failing quietly.
 | ------------------- | ------ | --------- |
 | `morph-api`         | `main` | `44111d4` |
 | `morph-wapp`        | `main` | `3882481` |
-| `builtin-plugins`   | `main` | `bc7c84e` |
+| `builtin-plugins`   | `main` | `0145d5f` |
 | `inflow-plugin-sdk` | `main` | `96d24b9` |
 | `node-plugin-sdk`   | `main` | `a051113` |
 
