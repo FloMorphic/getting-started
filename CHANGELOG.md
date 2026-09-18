@@ -16,7 +16,125 @@ component from the last recorded offset to its current `main`.
 ## [Unreleased]
 
 _Run `make changelog VERSION=<next>` to draft this section from the commits landed
-across all repos since v0.3.7._
+across all repos since v0.3.8._
+
+## [v0.3.8] — 2026-09-18
+
+A robustness release. The headline fix is for the **host-reboot race**: after a
+machine restart the API could come up with an empty engine pool and answer
+"no resource" to every run until someone restarted the container — it now
+**keeps looking for the engine in the background** until one is reachable. The
+**installer and image learned to point at an Infra by IP** (an existing platform
+on the Docker host, a remote box) instead of only by container name, the **AI
+flow designer stops generating Rule nodes that silently dead-end**, and the
+canvas got its **brand mark**.
+
+### Added
+
+- **`PLUGIN_INFRA_URL` — Infra's NATS address, set on its own.** Infra answers on
+  two addresses: its REST API (`:8022`) and NATS (`:4222`), and every plugin node
+  talks over the second. Until now the NATS endpoint was always derived from the
+  `INFLOW_INFRA_API` host, which is right for the stock platform stack and wrong
+  for a remapped NATS port or an Infra reachable on a different address. The
+  compose file, the installer and the entrypoint now take `PLUGIN_INFRA_URL`
+  (`host:port`, no scheme); left empty, the derived value still applies. The
+  installer's "existing platform" path derives and records it in `.env`, and the
+  summary prints it. _(getting-started)_
+- **`host.docker.internal` inside the FloMorphic container.** The compose file
+  injects `host.docker.internal:host-gateway`, so an Infra — or an LLM, an MCP
+  server, a database a node calls — running on the Docker host rather than on
+  `inflow_net` has a stable name from inside the container. The installer offers
+  it as the address for that case instead of a bridge-gateway IP that changes
+  whenever the network is recreated. _(getting-started)_
+- **`WithConnection` in the Go plugin SDK.** A plugin that already holds a NATS
+  handler can hand it to the SDK directly instead of having the SDK dial a
+  second time. _(inflow-plugin-sdk v0.2.3)_
+- **Canvas brand mark.** The header logo and favicon are now the FloMorphic mark
+  itself. The artwork was drawn for a dark surface, so light theme seats it on a
+  dark chip and dark theme leaves the chip transparent. _(morph-wapp)_
+
+### Changed
+
+- **The AI flow designer is taught the Rule node's real contract.** A Rule's
+  decision must be **one string equal to a handler `name`** (or an array of names
+  to fire several ports); anything else — an object like `{ pass: true }`, an
+  unknown string, `''`, `null`, `undefined` — fires no port, which prunes every
+  outgoing edge and ends that branch with no error and no log line. The designer
+  preamble and node catalog (server-side and canvas-side) now say exactly that,
+  demand an exhaustive decision on every path (`ok ? 'approved' : 'rejected'`,
+  never an `if` with no `else`), and the Rule node's default `logic_rule`
+  template — which used to be the very `{ pass: true }` object that never routes
+  — is a working two-way branch. _(morph-api, morph-wapp)_
+- **Installer normalizes whatever you type for the Infra address.** `host`,
+  `host:8022`, `http://host:8022/`, `nats://host:4222` and bracketed IPv6 all
+  land in `.env` the same way: the REST URL gains `http://` and the default port
+  when missing (but not behind `https://`, which is already a proxy on 443), and
+  the NATS endpoint is stripped to bare `host:port`. A non-HTTP scheme pasted
+  into the API prompt is flagged rather than written out. _(getting-started)_
+- **Installer always confirms the API Secret Key for an existing platform.** A key
+  found in a local `platform/.env` is now offered as an editable default rather
+  than silently assumed — that file describes the platform installed *here*,
+  which need not be the one being pointed at, and Infra mints a fresh secret
+  whenever it comes up without one. The paste hint (`Ctrl+Shift+V`) is shown
+  when the key has to be typed in. _(getting-started)_
+- **Cookbook flows carry their plugin's repo.** The naive-RAG and Qdrant-migrate
+  samples now declare `repo` on their Qdrant plugin reference, so the importer's
+  missing-plugin panel (new in v0.3.7) links straight to where to install it
+  from. _(flow-cookbook)_
+
+### Fixed
+
+- **The API no longer stays engine-less after a host reboot.** On a machine
+  restart every container starts at once; the engine (Fractal) is usually still
+  registering — or crash-looping on a NATS that is not up yet — when the runtime
+  SDK's one-shot startup reload probes Infra's engine list, so the pool came up
+  empty and stayed that way for the life of the process: **"no resource" on every
+  run** until the container was restarted or the engine was added by hand. The
+  API now keeps re-reading the engine list in the background with a capped
+  backoff (2 s → 30 s) until at least one registered engine answers. The reload
+  only fills the pool if it is still empty, so a resource an operator adds by
+  hand while a tick is in flight is kept and ends the loop, and the retry does
+  not repeat the per-resource "dropped" warnings every tick. _(morph-api,
+  inflow-fusion v0.3.5)_
+- **Adding an engine by hand from the settings dialog works for
+  portal-registered engines.** A hand-added resource carries no credential, and
+  the probe fell back to the Infra bearer — a different key — so an engine
+  enrolled through a portal answered 401 and never joined the pool, even though
+  it was live and correctly addressed. The runtime SDK now looks up the token
+  Infra already holds for that URL before probing. Along the way, a resource URL
+  typed without a scheme (`localhost:9001`, `127.0.0.1:9001`) is parsed
+  correctly instead of ending up as `localhost:9001:9001` or failing outright,
+  and the liveness error now says *which* part failed. _(morph-api, inflow-fusion
+  v0.3.4)_
+- **Plugin nodes can dial an Infra given by IP.** The Go plugin SDK ran
+  `url.Parse` over a bare `INFRA_URL`; that only worked because Go read
+  `inflow-infra:4222` as a scheme, and it rejected any host not starting with a
+  letter — `172.28.0.1:4222` failed with *"first path segment in URL cannot
+  contain colon"*, i.e. every install pointed at an existing platform by IP.
+  `INFRA_URL` is now normalized before dialing, accepting both `host:port` and
+  `nats://host:port`. The four builtin plugin modules (`cast`, `http`, `llm`,
+  `mcp`) build against the fixed SDK, and the image entrypoint additionally
+  aliases a bare-IP NATS endpoint in `/etc/hosts` (`infra-nats`) so any plugin
+  binary still on an older SDK keeps working. _(inflow-plugin-sdk v0.2.3,
+  builtin-plugins, getting-started)_
+
+### Maintenance
+
+- **Builtin plugin nodes build against Go plugin SDK v0.2.3.** _(builtin-plugins)_
+- **`morph-api` on inflow-fusion v0.3.5** (via v0.3.4), which carries the two
+  runtime fixes above. _(morph-api)_
+- `docs/development.md` documents `PLUGIN_INFRA_URL` next to `INFLOW_INFRA_API`.
+  _(getting-started)_
+
+### Baked from
+
+| Component           | Ref    | Commit    |
+| ------------------- | ------ | --------- |
+| `morph-api`         | `main` | `2f36ed0` |
+| `morph-wapp`        | `main` | `12b97ab` |
+| `builtin-plugins`   | `main` | `051f611` |
+| `inflow-plugin-sdk` | `main` | `87ed880` |
+| `node-plugin-sdk`   | `main` | `a025c5c` |
 
 ## [v0.3.7] — 2026-09-08
 
@@ -394,7 +512,8 @@ across the API, the canvas and both plugin SDKs.
 | `inflow-plugin-sdk` | `main` | `96d24b9` |
 | `node-plugin-sdk`   | `main` | `f50c101` |
 
-[Unreleased]: https://github.com/FloMorphic/getting-started/compare/v0.3.7...HEAD
+[Unreleased]: https://github.com/FloMorphic/getting-started/compare/v0.3.8...HEAD
+[v0.3.8]: https://github.com/FloMorphic/getting-started/compare/v0.3.7...v0.3.8
 [v0.3.7]: https://github.com/FloMorphic/getting-started/compare/v0.3.6...v0.3.7
 [v0.3.6]: https://github.com/FloMorphic/getting-started/compare/v0.3.5...v0.3.6
 [v0.3.5]: https://github.com/FloMorphic/getting-started/compare/v0.3.4...v0.3.5
