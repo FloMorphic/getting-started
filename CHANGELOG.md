@@ -16,7 +16,157 @@ component from the last recorded offset to its current `main`.
 ## [Unreleased]
 
 _Run `make changelog VERSION=<next>` to draft this section from the commits landed
-across all repos since v0.3.8._
+across all repos since v0.3.9._
+
+## [v0.3.9] — 2026-09-23
+
+A flow now has a **portable document and a road in and out of an install that
+does not need the browser**. The API gains **REST twins of the editor's Import
+dialog and Export button** (`POST /flow/import`, `GET /flow/id/:id/export`), the
+MCP server gains **`flo_import_workflow` / `flo_export_workflow`**, and every
+way a flow can land — REST import, MCP import, the designer's apply-patch — now
+goes through **one path** that re-stamps plugin nodes with the install's own
+identity and **reports the plugin actions it cannot serve** instead of saving a
+node that silently points nowhere. The AI designer also **learned a plugin
+action's outbound ports**, and the cookbook gained a **Linux-fleet HTTP / nginx
+audit** recipe built entirely over MCP. The palette gains a new builtin, **Jev**
+— a fast decider that routes a flow by calibrated answers to typed questions —
+and the plugin catalog lists two new Connect-backed plugins, **GitHub** and
+**Google Workspace**.
+
+### Added
+
+- **Jev — a new builtin node for fast, typed decisions.** Jev evaluates a block
+  of flow state against **typed questions** on TypeSafe's Jev (a "System One"
+  model) and returns a calibrated probability over every answer you declared —
+  never free text — in one call (70–500 ms, all questions in parallel). A
+  question is a `choice` (1–255 named options), a `score` (2–10 ordered levels)
+  or a `noul` (yes / no), with an optional `min_confidence` floor. It maps onto
+  the canvas the way an LLM with bound functions does: **every option of a
+  routed question is an output port**, tagged `<question>.<option>` (e.g.
+  `category.billing`), plus an `_exception` port for an API error, a missing
+  answer or a low-confidence result; a question with `route: false` is data
+  only. The full distribution, model version and credits used land on the node
+  scope. `state` is a text template with `{{$.path}}` variables — a template
+  that is exactly one token sends that JSON value as-is. The API key, model,
+  base URL and timeout come from a `jev-config` settings profile. It ships as
+  the `jev` plugin in `builtin-plugins` (picked up by the image build like the
+  others), the palette entry and seeded builtin in the API, which compiles it to
+  a Plugin node, and the node's drawer in the editor — options render as stacked
+  port cards. The AI designer knows it too: edges name a Jev port as
+  `<question id>.<option name>`, and the many-scope check flags a wildcard
+  `scope` on a Jev node with routed questions. _(builtin-plugins, morph-api,
+  morph-wapp)_
+- **`POST /flow/import` and `GET /flow/id/:id/export` — the portable workflow
+  document over REST.** The document is the file the editor's Export writes and
+  the cookbook ships: a designer **graph patch** (nodes named by a readable
+  `ref`, wired by `port` names, each carrying only the data that differs from
+  its kind's defaults) under a small header (`flomorphic`, `title`, `plugins`).
+  It is about half the size of the saved `FlowRecord` — no Vue-Flow render
+  state — and holds **no install-local identity**: no canvas ids, no
+  `extensionId` / `pluginId` (a per-install address), no plugin `form` /
+  `outbound`, and no resolved settings profile, so a provider token never rides
+  along in a file meant to be shared. Import takes `{ workflow, id?, title?,
+  dryRun? }`: `id` overwrites an existing flow (a re-install), `title` overrides
+  the document's own, and `dryRun` plans, stamps and compile-checks without
+  saving. Plugin nodes are matched **by action name** and re-stamped from this
+  install's extension table; an action no local plugin provides is kept, flagged
+  with the same `missingPlugin` marker the canvas badges, and listed in
+  `missingActions` with the repo / ref / subdir the document knows about — so an
+  installer can tell the operator what to install. Compiling is a check, not a
+  gate (a plugin node resolves its account through the live runtime, which an
+  install being provisioned has none of yet): the result carries `compileError`
+  alongside `problems`. Any JSON object with a `nodes` array is accepted, header
+  or not, so a bare patch a model wrote imports the same as an editor file. A
+  successful import emits `flow.changed` (`source: "import"`) so an open editor
+  refetches. _(morph-api)_
+- **`flo_export_workflow` / `flo_import_workflow` MCP tools.** The same document
+  and the same road, for an assistant: export returns the compact form to *read
+  and edit* a flow's design in, import takes it back with the same `id` /
+  `title` / `dryRun` choices and the same `missingActions` report. The tool
+  descriptions carry a short guide to the document's shape;
+  `flo_get_workflow` now points readers at export rather than the verbose raw
+  record. _(morph-api)_
+- **`designer.GraphToPatch` — the Go twin of the canvas exporter.** The inverse
+  of `PlanPatch`: canvas ids become refs derived from node titles, handle ids
+  become designer port names, and each node keeps only the data that differs
+  from its catalog defaults. A faithful port of the web app's `graphToPatch`, so
+  a flow exported by the API reads the same as one the Export button writes and
+  re-imports through the same planner. Lives with the new `flowfile` package
+  that both the REST routes and the MCP tools call. _(morph-api)_
+- **Cookbook: `linux-fleet-http-audit/`.** Audit a whole Linux fleet for HTTP
+  servers, nginx (host or Docker) and the hostnames they serve, one evidence row
+  per node: three parallel osquery sweeps fanned in by `promissall`, a JS node
+  that normalises plugin results and classifies by a union of signals, a `rule`
+  whose handlers are the branch, four probes `scope`'d over a computed target
+  list, and a `db.stages.upsert` sink. Built and debugged entirely over MCP.
+  _(flow-cookbook)_
+
+### Changed
+
+- **`flo_plan_patch` / `flo_apply_patch` land through the import road.** Both
+  now stamp plugin nodes with this install's identity by `action` and return
+  `missingActions`; a plan reports a compile failure in the result (with the
+  planned `graph` and `problems`) instead of raising it, and an apply returns
+  `compileError` next to the saved flow. A patch from the designer, a document
+  from a file and a flow drawn by hand are now indistinguishable once saved.
+  _(morph-api)_
+- **The AI designer knows a plugin action's outbound ports.** A plugin node
+  with declared `outbound` branches is a routing node like an LLM with functions
+  or a Rule with handlers: its edges can name a port by the branch's title, the
+  port resolves to the branch's tags, and the many-scope check now flags a
+  wildcard scope on such a node the same way it does for the builtins. Import
+  stamps identity *before* planning so those ports exist when the edges are
+  resolved. _(morph-api)_
+- `docs/mcp.md` tool table lists the import / export tools in place of the
+  removed upsert / compile pair. _(getting-started)_
+
+### Removed
+
+- **`flo_upsert_workflow` and `flo_compile_workflow` MCP tools.** Both took the
+  raw Vue-Flow `FlowRecord`, which is the wrong shape for anything that is not
+  the canvas. `flo_import_workflow` (with `dryRun` for a compile-only check) and
+  `flo_export_workflow` replace them; the designer's `flo_plan_patch` /
+  `flo_apply_patch` remain the way to author from scratch. `POST /flow` still
+  accepts a raw record over REST. _(morph-api)_
+
+### Fixed
+
+- **Connecting an oomol app that has no in-app OAuth now opens that app's own
+  page** in the oomol console (`/connections/<app>`, `no_auth:` prefix dropped)
+  instead of the generic connections list. _(morph-wapp)_
+- **The Jev plugin reads the reply the live service actually sends.** The
+  service wraps its answers (`{"code":0,"data":{"result":{…},"creditsUsed":1}}`)
+  while TypeSafe's published reference shows them flat; both shapes are now
+  decoded, and the credits a call used are reported on the scope. The plugin
+  also targets the host that serves the API (`thejevai.com`) and sends an
+  explicit `User-Agent` for its CDN. _(builtin-plugins)_
+
+### Maintenance
+
+- `morph-api` README documents the two new routes. _(morph-api)_
+- `bytedance/sonic` bumped 1.15.2 → 1.15.4. _(morph-api)_
+- **Plugin catalog: two new Connect-backed plugins, both beta.**
+  [GitHub (OpenConnector)](https://github.com/FloMorphic/github-oc) — 13
+  read-only actions over repositories, activity, search and the security surface
+  (Dependabot / secret-scanning / code-scanning alerts, branch protection and
+  rulesets, org members and 2FA, deploy keys, webhooks, Actions settings); the
+  catalog's first Python `-oc` plugin. [Google Workspace
+  (OpenConnector)](https://github.com/FloMorphic/google-office-oc-plugin) — 30
+  actions across Sheets, Docs, Drive and Calendar. Like Gmail, both hold no
+  provider credentials: they act as an account connected once in **Connect**,
+  over `flomorphic.svc.oc.*`, so they run on FloMorphic only. The catalog also
+  gained a *Running one* guide (`docs/run-a-plugin.md`). _(plugin-catalog)_
+
+### Baked from
+
+| Component           | Ref    | Commit    |
+| ------------------- | ------ | --------- |
+| `morph-api`         | `main` | `bf7fe69` |
+| `morph-wapp`        | `main` | `ce0815e` |
+| `builtin-plugins`   | `main` | `bd99581` |
+| `inflow-plugin-sdk` | `main` | `87ed880` |
+| `node-plugin-sdk`   | `main` | `a025c5c` |
 
 ## [v0.3.8] — 2026-09-18
 
