@@ -16,7 +16,260 @@ component from the last recorded offset to its current `main`.
 ## [Unreleased]
 
 _Run `make changelog VERSION=<next>` to draft this section from the commits landed
-across all repos since v0.3.9._
+across all repos since v0.4.0._
+
+## [v0.4.0] — 2026-09-28
+
+This release is about **a run that survives the things FloMorphic does not
+control**. A model call is the one step a flow takes that fails for reasons
+nothing in the install can fix — a provider stalls with nothing on the wire, or
+has a bad minute and answers 502 — and until now the first wedged a node
+indefinitely and the second threw away every turn before it. `llm` and `mcp` now
+call the model through **one deadline per attempt and a retry that classifies by
+structure** rather than by provider wording, `http` retries **by idempotence** so
+a POST is never sent twice on a maybe, and both knobs are now **reachable from
+the settings profile** instead of living only in plugin defaults. The default
+whole-run budget moves from one hour to three. Alongside that, the log WebSocket
+— the one unguarded surface on an otherwise guarded install — **is now gated when
+`AUTH_ENABLED=true`**, and the canvas learned how to authenticate. The whole Go
+side of the product moves to **Go 1.27**.
+
+The other half of surviving a bad minute is **being able to say what happened**.
+A flow does not halt for a node error — the node reports it and the run carries
+on — so a run that hit five of them used to finish with a row that read exactly
+like a clean one. The engine now stamps an **error ledger** into the run's
+context header, the backend keeps it on the process row, and the process list
+renders it, separating **what the flow got wrong from what the platform did**.
+When carrying on is not what you want, **Stop on error** is now a run setting on
+the Run dialog, on triggers and on `flo_start_process`. The canvas grew a **run
+HUD**: the event stream the log drawer prints as text, drawn on the nodes it is
+about. And both plugin SDKs move a failure's reason onto **its own field on the
+terminal command** and gain a **signal port**, so a plugin can learn that the run
+it is working for is gone.
+
+### Added
+
+- **The run's error ledger — on the process row, and in the process list.** A
+  flow does not stop for a node error: the node records it and the run carries
+  on. That is the right default and it is also why a run that hit five of them
+  used to finish indistinguishable from a clean one — the row said `finished`
+  and nothing more. The engine now stamps every error it records into the
+  context document's header under `_errors`, and the `UpdateContext` handler
+  lifts it onto the **process row for that pid**, in one write with the
+  traversal snapshot, because both describe the same instant of the same run. It
+  is per-pid and not on the shared context row for the same reason the snapshot
+  is: overlapping runs over one `contextId` clobber each other. It lands in a
+  new `errors` column, migrated onto existing databases with a default of `{}`,
+  and it is deliberately **distinct from `error`** — that is the one thing that
+  ended the run, this is everything the run recorded and ran past. Each entry
+  carries `ts`, `kind`, `flow`, `node`, `src`, `code` and `msg`, and `src` uses
+  the same vocabulary (`rt` / `js` / `rego` / `plugin:<title>`) a log line does,
+  so an entry joins onto the run's event stream. _(morph-api)_
+- **Errors on a process row in the canvas.** The ledger expands under its row in
+  the process list and in the run's detail panel, with node ids resolved to
+  titles against the saved graph the way the log drawer resolves a line — the
+  wire only ever carries ids. Each entry is badged by `kind`, which is the point
+  of the whole thing: **`node`** is the flow author's own — their js, their rego,
+  the node data they wrote, something their node called that did not deliver —
+  and is what they can act on; **`system`** is the platform's, which nothing in
+  the flow caused and nothing in the flow mends. The header count is the true
+  total and the list may be shorter: the ledger rides inside the context
+  document, which has a publish limit, so a cascading run's entries are capped
+  and the ones kept are the **earliest** — which is where the cause of a cascade
+  is. _(morph-wapp)_
+- **Stop on error.** The engine carries on past a node error by default, and for
+  a long flow that is usually right; for a flow whose later nodes only make sense
+  if the earlier ones worked, it is not. `stopOnError` is now a run setting
+  end-to-end: a checkbox in the Run dialog (remembered per-user in `localStorage`
+  with the other run settings), a checkbox on a trigger's run settings, a
+  `stopOnError` argument on the `flo_start_process` MCP tool and on
+  `POST /process`, mapped through to `fuse.WithStopOnError`. Like the numeric
+  settings it is an **override only when set** — the engine default is already
+  `false`, so only a `true` is shipped, and a trigger whose settings are all
+  defaults still stores none at all. _(morph-api, morph-wapp)_
+- **A run HUD on the canvas.** The events the log drawer prints as lines are now
+  also drawn on the nodes they are about: a corner badge saying where each node
+  stands (queued / running / done / failed) with its pass count — `>1` is a loop
+  or a GoTo re-entry — and a pie of a plugin's progress frames, plus a band under
+  the header that appears only when there is something to read: the frame text,
+  what a join is still waiting for, a scope fan-out, an error, or a branch that
+  `stop_on_error` cut short. Above it sits the HUD proper, which answers the
+  question the badges cannot: **which run you are watching.** The socket carries
+  every run on the engine and one flow can easily have several in flight, so it
+  names the followed pid, where control is right now, how long it has been going
+  — from a clock, not from the stream, because a run waiting on a plugin emits
+  nothing for minutes and a frozen timer reads as a hung editor — and it is the
+  switcher between this flow's live runs without opening the drawer. This is a
+  reducer over the raw event stream, not a second tracker: one reactive object,
+  with the log detail that actually renders on a node lifted out of the generic
+  fields bag and typed, keyed on `flow:node` because one process spans several
+  flows through GoTo and a node id is unique only within its flow. A canvas with
+  no run on it renders exactly as it did before. _(morph-wapp)_
+- **A signal port for plugins — `OnSignal` / `onSignal`.** Both SDKs can now
+  subscribe to `inflow.plugin.<PLUGIN_ID>.>`, a one-way channel out of the
+  runtime, parallel to the `inflow.v1` (describe me) and `inflow.cpu` (run me)
+  planes; nothing on it is a request and a handler never replies. `proc` is
+  published once per plugin node process the moment the runtime stops attending
+  it — on **every** outcome, not only cancellation — carrying the `Conclusion`
+  and the SDK's own `jobId`. It is entirely optional, and not registering it
+  remains the norm: when a process is stopped or times out the job deliberately
+  keeps running, because a later process may pick up where it left off (the
+  runtime hands the previous `jobId` back in `_registry`), so work done after a
+  stop is not wasted. Register one only where the work itself must also stop — a
+  stream to close, an upstream call to abort, a reservation to release — and test
+  `Conclusion.Canceled()`, which separates *a decision taken outside the job*
+  (user stop, stop command, workflow timeout, idle window) from the job simply
+  finishing or failing. Handlers run on their own goroutine/task and a panic in
+  one is recovered rather than taking the plugin down. _(inflow-plugin-sdk,
+  node-plugin-sdk)_
+- **Bounded, retrying model calls in `llm` and `mcp`.** Both nodes now reach the
+  provider through a single `callModel` path: **one deadline per attempt**
+  (default 3 minutes — sized between a measured 1m52s worst-case first token and
+  the ~220s idle timeout that commonly sits in front of a model) and a retry on
+  the failures a second attempt can actually fix. The classifier reads
+  **structure** — error kinds, `net.Error`, DNS temporariness, HTTP status class
+  — not provider wording, which differs per provider and would quietly go wrong
+  on the next one; a refusal or a bad request is never retried. Backoff is
+  exponential with jitter, so an outage does not bring every node back in the
+  same instant. _(builtin-plugins)_
+- **`http` retries by idempotence.** A model call has no side effect; an HTTP
+  request may charge a card, so the question is not "did this fail" but "could it
+  have succeeded before it failed here". `GET` / `PUT` / `DELETE` retry on any
+  transient failure; **`POST` and `PATCH` only when the request provably never
+  arrived**, or when the server itself says it did not process the request (429,
+  503). `Retry-After` is honoured and capped. Exhausting the budget **returns the
+  server's last response rather than raising** — a 503 must reach the flow the
+  way a 404 does, with its status and body intact, because the node routes on
+  `status` and `ok`. _(builtin-plugins)_
+- **The resilience knobs on the settings profiles.** `Model call timeout
+  (seconds)` and `Retries` are now fields on the `llm`, `mcp` and `http` settings
+  forms, and the compiler projects `request_timeout_s` / `max_retries` onto the
+  plugin body — the whitelist would otherwise have dropped them before they
+  reached the plugin no matter what the form saved. Neither field carries a
+  default: a seeded default would freeze today's number into stored data, so
+  **blank omits the key entirely and the plugin applies its own** (shown as the
+  placeholder), while an explicit **`0` turns retrying off**. That distinction is
+  why the count is nullable on both sides — a plain int would leave an operator
+  no way to disable retries on a non-idempotent endpoint. HITL is deliberately
+  left out: its chat runs on the backend's own `llm.Config`, which reads neither
+  knob, so offering the controls there would be a lie. _(morph-api, morph-wapp)_
+- **The log WebSocket is authenticated when `AUTH_ENABLED=true`.** `/ws/:id` was
+  mounted outside the CRUD gate because a browser cannot set an `Authorization`
+  header on a WebSocket upgrade, which left it open on an otherwise guarded
+  install. It now applies its own equivalent gate: `HS256SocketKeyHandler` tries
+  the header first and falls back to `?Authorization=<token>` (bare, no `Bearer`
+  prefix), so a non-browser client that *can* set headers keeps the token out of
+  the URL. A token in a URL is visible to access logs and proxies in a way a
+  header is not — that is the cost of gating a browser WebSocket at all, and the
+  reason to terminate TLS in front of any install that turns auth on. With auth
+  off the socket stays open, which is still the default. _(morph-api)_
+- **`VITE_API_TOKEN` — the canvas can authenticate.** An API started with
+  `AUTH_ENABLED=true` gates every CRUD group, `/mcp` and now the log socket
+  behind an HS256 bearer signed with its `API_JWT_SECRET`, and there is no login
+  endpoint to obtain one from. The token is therefore configuration: minted out
+  of band and handed to the app as `VITE_API_TOKEN`, which the HTTP client, the
+  socket handshake and the MCP connect dialog all read back out. It is inlined
+  into the bundle at build time, so it **identifies the install, not a user** —
+  it belongs only to a single-tenant deployment behind a trusted boundary. Unset
+  (the default) sends no header. _(morph-wapp)_
+- **"Use it with an AI" in the canvas toolbar.** A dialog putting the two ways to
+  drive FloMorphic with a model side by side, both sharing the property that is
+  the reason they are the two on offer: **FloMorphic never holds a provider
+  key.** *Build with AI* hands you a prompt built from this install's real node
+  catalog, then validates and previews the graph you paste back — no backend
+  required. *MCP server* gives a client you already have (Claude Desktop, Claude
+  Code, Cursor, Codex) the whole API as tools over streamable HTTP at `/mcp`,
+  with the endpoint, config JSON and `claude mcp add` command generated for this
+  install. It is also the only honest answer to "can I use my Claude Pro / Max or
+  ChatGPT Plus subscription?" — a subscription is not an API key and no endpoint
+  accepts one, but the desktop client you are already signed in to can connect
+  here. Written up in `docs/connect-mcp-client.md`. _(morph-wapp)_
+- **Auto-repair for pasted AI JSON.** Assistants routinely emit JSON that is
+  *nearly* right — a raw newline inside a code string, a trailing comma, a smart
+  quote — and the AI-build importer used to make you hunt for it. It now falls
+  back to a repair pass and hands the result to the review step **flagged as
+  repaired**, with a warning naming what a repair can silently change: an
+  unescaped `"` inside a value can split it apart, and an invalid escape is
+  dropped rather than kept (a regex `/\d+/g` can come back as `/d+/g`). The
+  repair never runs on text that already parses, and its output is always
+  reviewed rather than applied. _(morph-wapp)_
+
+### Changed
+
+- **Go 1.27 across the whole Go side of the product.** Every module's `go`
+  directive, both build stages of the image and the plugin-rebuild stage now sit
+  on 1.27: `morph-api`, all five `builtin-plugins` modules, `inflow-plugin-sdk`,
+  and the `golang:1.27-alpine` bases in `Dockerfile.flomorphic`. Docs that quoted
+  a toolchain requirement moved with them. _(morph-api, builtin-plugins,
+  inflow-plugin-sdk, getting-started)_
+- **The default execute timeout is three hours, not one.** `proc_timeout` now
+  defaults to `10800` in the Run dialog. A flow that waits on a human, a long
+  agentic loop or a slow fleet sweep was hitting a one-hour wall that had nothing
+  to do with the work. The run settings are still per-user and remembered in
+  `localStorage`, so an existing install keeps whatever it last used.
+  _(morph-wapp)_
+- **The `mcp` node's model turn is streamed.** This is a reliability decision,
+  not a cosmetic one: a buffered request is silent on the wire through prefill
+  and generation and an intermediary cuts it off, while a stream resets that
+  timer every few hundred milliseconds. Six calls each way against a real
+  endpoint: buffered failed twice, streamed none. The chunks are discarded — the
+  callback exists only to ask for a stream. _(builtin-plugins)_
+- **A failed job reports on its own field, not as a detail.** `DoneWithError`
+  used to write the reason into `Details["error"]`, which made the terminal
+  command's payload do two jobs at once: a terminal command's details **are**
+  what gets committed onto the node's scope, so the reason was committed with
+  them and the key `error` was reserved out from under every plugin. It now
+  travels in `CommandPayload.Error` (`{code, message}`), whose **presence — not
+  its contents — is the verdict**: the core concludes the job failed whenever the
+  field is there, even with an empty message. So a bare `DoneWithError` now
+  commits **nothing** (it used to commit `{"error": …}`), `DoneWithErrorData`
+  commits exactly what you hand it with no key reserved, and the new
+  `DoneWithErrorCode` / `doneWithErrorCode` attaches the plugin's own error
+  number — the core carries it next to the message and never interprets it, so
+  pass `0` when the plugin has no such numbering. A plugin that persisted scope
+  (a conversation, a cursor) still has to hand it back through `data`; that has
+  not changed. _(inflow-plugin-sdk, node-plugin-sdk)_
+- **Builtin plugin nodes build against Go plugin SDK v0.2.4.** All five modules
+  (`cast`, `http`, `jev`, `llm`, `mcp`) move from `go-plugin-sdk` v0.2.3, which
+  is what carries the change above into the nodes people actually run: every one
+  of them reports its failures through `DoneWithError`, so a failing `http`,
+  `mcp` or `cast` node **no longer writes `{"error": …}` onto its scope** — the
+  reason travels on the command's own field and surfaces in the run's error
+  ledger instead. A flow that read the failing node's scope for an `error` key
+  has to read the ledger now. `jev` is the one that also carried a payload
+  (`DoneWithErrorData`, so a routed decision's data survives the failure); that
+  payload is committed exactly as before, minus the overwritten key. None of the
+  five registers a signal handler, so nothing changes there yet.
+  _(builtin-plugins)_
+- Dependency and doc upkeep: `inflow-fusion` 0.3.6 → 0.3.7 (the engine side of
+  the error ledger and `stop_on_error`), `@inflowenger/flow-trace` 0.2.2 → 0.2.3
+  for the error-kind types the ledger and the HUD read, `@inflowenger/node-plugin-sdk`
+  published as 0.1.9, and the node palette written up at its current fifteen —
+  **Jev** and **HTTP** had shipped without reaching `docs/nodes.md`.
+  _(morph-api, morph-wapp, node-plugin-sdk, getting-started)_
+- Dependency upgrades across the plugin modules: `bytedance/sonic` 1.15.2 →
+  1.15.4 (loader 0.5.1 → 0.5.2), and `golang.org/x/{crypto,net,sync,sys,text}`
+  moved forward in `llm` and `mcp`. _(builtin-plugins)_
+
+### Fixed
+
+- **A streamed tool call no longer poisons the next request.** `langchaingo`
+  drops the stream index and appends every fragment to the last tool call it saw,
+  so a streamed call could arrive with another call's arguments welded onto it.
+  Left alone the raw text is replayed in the following request and the provider
+  rejects the **whole conversation** with a 400 — one malformed call costing the
+  entire run. Arguments are now trimmed to the first complete JSON value.
+  _(builtin-plugins)_
+
+### Baked from
+
+| Component           | Ref    | Commit    |
+| ------------------- | ------ | --------- |
+| `morph-api`         | `main` | `3440131` |
+| `morph-wapp`        | `main` | `2c46aa8` |
+| `builtin-plugins`   | `main` | `811e93e` |
+| `inflow-plugin-sdk` | `main` | `ca83561` |
+| `node-plugin-sdk`   | `main` | `d20bb3b` |
 
 ## [v0.3.9] — 2026-09-23
 
@@ -662,7 +915,9 @@ across the API, the canvas and both plugin SDKs.
 | `inflow-plugin-sdk` | `main` | `96d24b9` |
 | `node-plugin-sdk`   | `main` | `f50c101` |
 
-[Unreleased]: https://github.com/FloMorphic/getting-started/compare/v0.3.8...HEAD
+[Unreleased]: https://github.com/FloMorphic/getting-started/compare/v0.4.0...HEAD
+[v0.4.0]: https://github.com/FloMorphic/getting-started/compare/v0.3.9...v0.4.0
+[v0.3.9]: https://github.com/FloMorphic/getting-started/compare/v0.3.8...v0.3.9
 [v0.3.8]: https://github.com/FloMorphic/getting-started/compare/v0.3.7...v0.3.8
 [v0.3.7]: https://github.com/FloMorphic/getting-started/compare/v0.3.6...v0.3.7
 [v0.3.6]: https://github.com/FloMorphic/getting-started/compare/v0.3.5...v0.3.6

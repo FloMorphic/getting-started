@@ -46,7 +46,7 @@ ARG APP_VERSION=
 ARG GOPROXY="https://proxy.golang.org,direct"
 
 # ── the API (cgo: sqlite + sqlite-vec) ────────────────────────────────────────
-FROM golang:1.26-alpine AS api-build
+FROM golang:1.27-alpine AS api-build
 ARG API_REPO
 ARG API_REF
 ARG GOPROXY
@@ -77,7 +77,7 @@ RUN make build BINARY=/out/flomorphic-api \
 # with no GOARCH juggling — amd64 natively on an amd64 builder, arm64 under QEMU
 # (or natively on an arm64 builder). Every folder with a go.mod is compiled and
 # dropped into /out/plugins/<folder>.
-FROM golang:1.26-alpine AS plugins-build
+FROM golang:1.27-alpine AS plugins-build
 ARG PLUGINS_REPO
 ARG PLUGINS_REF
 ARG GOPROXY

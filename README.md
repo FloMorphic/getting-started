@@ -168,7 +168,7 @@ platform stays installed, and you run the product layer from your own checkouts.
 # 1. Platform (Infra + Fractal) — installed containers, left running
 curl -fsSL https://raw.githubusercontent.com/Inflowenger/getting-started/main/install.sh | bash
 
-# 2. FloMorphic API   (Go 1.26+, cgo)                        → :8025
+# 2. FloMorphic API   (Go 1.27+, cgo)                        → :8025
 git clone https://github.com/FloMorphic/morph-api.git && cd morph-api
 cp .env.example .env      # INFLOW_INFRA_API=http://localhost:8022
 make run                  # INFLOW_INFRA_JWT_SECRET=<the platform's API Secret Key>
@@ -289,7 +289,7 @@ Claude Desktop connects by URL (**Settings → Connectors → Add custom connect
 | [`inflow-fusion`](https://github.com/Inflowenger/inflow-fusion) | SDK | The Go SDK: `InitBackend`, the `IInflowService` contract, typed node builders, `svcHandler`, scoped credentials, and the Vue Flow compiler. |
 | `go-plugin-sdk` · `node-plugin-sdk` · [`py-plugin-sdk`](https://pypi.org/project/inflowenger-plugin-sdk/) | SDK | Build a plugin against the `inflowv1` protocol — actions, meta methods, settings forms, live progress. Go, Node/TypeScript and Python, wire-identical: pick the language, not a different protocol. |
 | `inflow-inspector` + `inspector-api` | reference | The low-level developer panel: edit raw primitives, inspect contexts and running processes. The worked example of consuming the SDK. |
-| `flomorphic-api` (`morph-api`) | product | FloMorphic's backend: Go 1.26 + Fiber v3, SQLite + `sqlite-vec` via sqlc, the Vue Flow → primitive compiler, and the `svc.*` handlers backing store / HITL / continue nodes. |
+| `flomorphic-api` (`morph-api`) | product | FloMorphic's backend: Go 1.27 + Fiber v3, SQLite + `sqlite-vec` via sqlc, the Vue Flow → primitive compiler, and the `svc.*` handlers backing store / HITL / continue nodes. |
 | `flomorphic-wapp` | product | The canvas: Vue 3 + Vite + TypeScript + Vue Flow + Tailwind v4 + Pinia. Runs standalone (browser-local) or connected. |
 | [`builtin-plugins`](https://github.com/FloMorphic/builtin-plugins) | product | The `llm` and `mcp` plugin node binaries. |
 | [`Inflowenger/getting-started`](https://github.com/Inflowenger/getting-started) | ops | Installer for the platform (Infra + Fractal) and the inspector panel. |

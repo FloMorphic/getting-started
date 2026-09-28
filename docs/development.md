@@ -115,7 +115,7 @@ tell the difference.
 
 ## 1. `morph-api` from source
 
-Go 1.26+ and a C compiler (the sqlite driver and `sqlite-vec` are cgo).
+Go 1.27+ and a C compiler (the sqlite driver and `sqlite-vec` are cgo).
 
 ```bash
 git clone https://github.com/FloMorphic/morph-api.git
@@ -191,8 +191,13 @@ Leave `VITE_API_BASE_URL` empty and the canvas runs standalone against browser
 storage — useful for pure UI work, and the mode the header reports as
 disconnected.
 
-The log drawer is a WebSocket (`/ws/flomorphic`) onto the same base URL. It is
-mounted before the auth gate, so it stays open even with `AUTH_ENABLED=true`.
+The log drawer is a WebSocket (`/ws/<per-tab id>`) onto the same base URL. It is
+mounted outside the CRUD auth gate — a browser cannot set an `Authorization`
+header on a WebSocket upgrade — but it is **not** ungated: with
+`AUTH_ENABLED=true` the route applies its own HS256 check, reading the bearer
+from `?Authorization=<token>` when the header is absent, and the canvas sends
+`VITE_API_TOKEN` on the handshake. With auth off (the default) the socket is
+open.
 
 ---
 

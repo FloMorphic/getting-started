@@ -1,6 +1,6 @@
 # Node palette
 
-FloMorphic's canvas ships thirteen nodes, grouped by intent. Every one is
+FloMorphic's canvas ships fifteen nodes, grouped by intent. Every one is
 annotated with the [runtime primitive](./concepts.md#the-claim-a-handful-of-primitives-spans-everything)
 it lowers to — that annotation is visible in the product, not hidden in the
 compiler.
@@ -24,6 +24,7 @@ compiler.
 | Node | Lowers to | What it does |
 | --- | --- | --- |
 | **LLM** | `Plugin` | One turn of a model conversation held on the node's scope, streamed to the canvas. Provider config comes from a settings profile; the prompt template lives on the node. **Bound functions become output ports.** |
+| **Jev** | `Plugin` | A calibrated *decider*, not a reasoner. Evaluates a state template against typed questions (choice / score / noul) and routes each question's top answer to its own outbound port (`<question>.<option>`). One round-trip, no free text, no refusal — a question with no confident match answers `other`, which you draw as a port. |
 | **MCP** | `Plugin` | An MCP *client*. "Tool only" calls a single tool with typed arguments, no model involved. "With LLM" drives a model bound to the server's tools and runs the agentic loop internally. |
 | **Rule** | `Contract` | Evaluate JS or OPA/Rego over the scoped context; each handler is a tagged output port. The branching, policy and guardrail node. |
 | **JS** | `Code · js` | A JavaScript step over the scoped context, result written to `key`. |
@@ -36,6 +37,12 @@ compiler.
 | **Doc Store** | `Extrinsic · svc.store.doc.*` | Read (a validated read-only query) or write documents in a referenced **Document** memory store. |
 | **Vector Store** | `Extrinsic · svc.store.vec.*` | Index or search a referenced **Vector** memory store — embedding text, top-k neighbours, optional partition namespace. |
 | **Cast / Mapping** | `Plugin` | Build a value by mapping each target key of a store's schema to a static value or a JSONPath resolved at run time. |
+
+## Integrations
+
+| Node | Lowers to | What it does |
+| --- | --- | --- |
+| **HTTP** | `Plugin` | An HTTP/REST request. Connection config (base URL, auth, headers) comes from a settings profile; `{{$.a.b}}` tokens in every string field resolve against the live flow context at run time. The clearest "talk to anything" node — and the proof that an integration needs no runtime support. |
 
 ## Human
 
