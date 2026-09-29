@@ -16,7 +16,153 @@ component from the last recorded offset to its current `main`.
 ## [Unreleased]
 
 _Run `make changelog VERSION=<next>` to draft this section from the commits landed
-across all repos since v0.4.0._
+across all repos since v0.4.1._
+
+## [v0.4.1] — 2026-09-29
+
+A patch release about **what an MCP node is allowed to do, and what an edge
+looks like while it waits**. An MCP server hands a node everything it offers, and
+until now the node handed all of it to the model — so pointing a flow at a
+filesystem server meant `write_file` and `run_command` were on the table
+alongside `read_files`. The node now carries a **whitelist**: the drawer lists
+the server's catalogue with a tick per tool, reloading the catalogue can only
+ever narrow the selection, and the binding is **enforced when the model calls**,
+not just when the tools are advertised — because this node feeds tool output
+straight back to the model, so a file it reads can ask it to call something. On
+the canvas, the edges learned the part of a run the node badges cannot show: the
+**wait**. An edge whose far end is still working marches, drains as that node's
+progress climbs, and stops doing either the moment it exits.
+
+The two fixes are the kind that read as something else being broken: the edge
+halo was a CSS filter that **cut every edge off at a rectangle** as soon as you
+zoomed out, and a flow imported by anything other than the editor reached its
+plugins with **empty settings**, which the plugin correctly refused — looking
+like a broken plugin rather than an unresolved profile reference. Alongside
+those, the **AI designer** learned the traps in an `llm` or `mcp` node — chief
+among them that a node inside a loop must clear its history or the loop cannot
+change its own outcome — and the canvas **drops the per-run Request timeout**,
+which was never a per-run choice.
+
+### Added
+
+- **A tool whitelist on the MCP node.** The `run` mode's tools are what the model
+  may call on your behalf, and the node used to bind every one the server
+  advertised. The drawer now lists the catalogue with a checkbox per tool and
+  the node stores **only the ticked subset** — held apart from the discovered
+  list (a new `mcpToolCatalog` on the node) precisely so that pressing *Reload
+  tools* cannot silently widen what the model is allowed to do: an existing
+  selection is intersected with what the server still advertises, so a tool that
+  vanished drops out and nothing is ever added. A node with no selection yet
+  takes the whole catalogue, and an **empty selection still means "bind
+  everything"** — the meaning the plugin has always had — so the drawer says that
+  out loud in a warning rather than letting "nothing ticked" read as the
+  opposite. `call_tool` mode is unaffected: its picker reads the catalogue, so a
+  tool left unticked for the model is still callable as the node's one explicit
+  call. _(morph-wapp, builtin-plugins)_
+- **The binding is enforced at call time, not just at advertisement.** Offering a
+  subset is a hint; a model can still name a tool it was never given —
+  hallucinated, carried over from a conversation seeded under a different
+  selection, or **suggested by text inside a tool result**, which matters here
+  because the node feeds file contents straight back to the model. An unbound
+  name is now refused: it is never called, the run shows a `tool refused` frame,
+  and the model is answered with a short explanation on that `tool_call` id
+  rather than having the call dropped — dropping it leaves the next request
+  malformed for most providers. `tools_used` reports what actually ran, not what
+  was asked for. _(builtin-plugins)_
+- **Edges that show the wait between two nodes.** A comet marks the instant
+  control crosses an edge; nothing marked the minutes after. An edge whose target
+  is still working now **marches** — dashes travelling source → target — and the
+  line **drains** toward the idle colour as that node's progress frames arrive,
+  so the picture empties as the work it delivered is finished and snaps back when
+  the node exits. The dashes are delayed a beat behind the target entering, so a
+  node that answers in under half a second never shows them, and each new pass
+  restarts the wait instead of inheriting it. A parked join does not flow — it is
+  waiting on the *other* branches and this one has already delivered. Zoomed in
+  past 1.35×, an edge the run crossed also gets a slow-blinking trace behind it,
+  which at a distance would only fatten every line and so is not drawn. All of it
+  holds as static overlays under `prefers-reduced-motion`. _(morph-wapp)_
+
+### Changed
+
+- **The MCP node no longer routes by which tool was called.** It mirrored the LLM
+  node's tool routing, but the two are not alike: an LLM node's bound functions
+  **are** canvas ports, while the MCP node's tools are internal to its agentic
+  loop and derive no ports at all. Filtering on them therefore pruned the node's
+  one plain outgoing edge and **ended the branch silently** whenever a tool ran.
+  Branch on the node's result instead. _(builtin-plugins)_
+- **The AI designer knows what an `llm` / `mcp` node gets wrong.** Its node
+  catalogue and its preamble gained the three things a generated flow kept
+  tripping over. **`body.clear_history`** (default `false`) means the node
+  *resumes* its conversation across runs, so a node inside a **loop** is seeded
+  once and later passes hand the model no new input at all: it answers from the
+  first pass's stale history, the conversation grows every run, and the loop
+  cannot change its own outcome however many times it goes round — now written
+  into the loop recipe as a third way a loop fails to terminate, beside
+  forgetting to advance the counter and missing the back-edge.
+  **`body.max_tool_turns`** (default 8) is floored at that default, so only a
+  *higher* value takes effect. And the `mcp` node's real shape: `functions` is a
+  **whitelist** rather than a catalogue, to be restricted when the task is
+  read-only and the server also offers write or shell tools; **both** modes have
+  one untagged output, so tool calls never become edges and there is nothing to
+  tag; and there is **no `_exception` port**, so a failed call commits
+  `{ "error": … }` to its key and the *next* node has to test it. The designer
+  also now sets `data.settingsId` on a plugin node when it knows which profile
+  applies — import resolves it against this install's own profiles, which is what
+  the flowfile fix below made dependable. _(morph-api)_
+
+### Removed
+
+- **The per-run Request timeout knob, from the canvas.** `svc_req_timeout` is the
+  fallback for an http or nats call that carries no timeout of its own — a
+  backend-owned default, not a property of one run — and offering it on the Run
+  dialog and on every trigger invited tuning it in the wrong place. It is gone
+  from the Run dialog, from a trigger's run settings and from the run-settings
+  store; the engine's own default is unchanged, and a value an install had
+  remembered per-user is simply no longer sent. _(morph-wapp)_
+
+### Fixed
+
+- **Edges cut off at a rectangle when you zoomed out.** The canvas-coloured halo
+  that keeps crossing edges tellable apart was a `drop-shadow` filter on the
+  whole edges layer. A CSS filter clips the element it is on to its filter
+  region, and that region is the `<svg>`'s border box — the size of the canvas
+  container — while Vue Flow draws edges far outside it through
+  `overflow: visible`. So every edge was clipped to a fixed rectangle: invisible
+  while you were zoomed in on graph space inside the box, and a straight cut
+  across the screen the moment you zoomed out or panned away. The halo is now a
+  real stroke painted under each edge, which also removes the same trap from the
+  run layers — on a straight edge the path's bounding box has no height at all,
+  so a glow clipped to it takes the stroke with it. _(morph-wapp)_
+- **A flow imported outside the editor reached its plugins with empty settings.**
+  Export deliberately keeps only a node's `settingsId` and strips the resolved
+  values, because those hold provider tokens — and the compiler reads
+  `data.settings` and nothing else. The editor re-resolves the reference on its
+  own import path, but none of the **server-side** roads in did:
+  `flo_import_workflow`, the designer's `flo_plan_patch` / `flo_apply_patch`, and
+  `POST /flow/import`. A node arriving that way reached its plugin with an empty
+  settings map and the plugin correctly refused the job on missing required
+  fields, so an unresolved reference presented as a broken plugin. Import now
+  re-attaches the profile for every node that names one. An id this install does
+  not have leaves the node with empty settings rather than failing the import —
+  the same treatment a missing plugin action gets, and the operator picks a
+  profile in the drawer. _(morph-api)_
+
+### Maintenance
+
+- Comment cleanup over the code this release touched — the settings-profile
+  resolver in `flowfile`, the MCP node's refusal path, and the canvas's MCP tool
+  drawer and run-settings store. No behaviour change.
+  _(morph-api, morph-wapp, builtin-plugins)_
+
+### Baked from
+
+| Component           | Ref    | Commit    |
+| ------------------- | ------ | --------- |
+| `morph-api`         | `main` | `ec597e1` |
+| `morph-wapp`        | `main` | `a4614ec` |
+| `builtin-plugins`   | `main` | `164ada5` |
+| `inflow-plugin-sdk` | `main` | `ca83561` |
+| `node-plugin-sdk`   | `main` | `d20bb3b` |
 
 ## [v0.4.0] — 2026-09-28
 
@@ -915,7 +1061,8 @@ across the API, the canvas and both plugin SDKs.
 | `inflow-plugin-sdk` | `main` | `96d24b9` |
 | `node-plugin-sdk`   | `main` | `f50c101` |
 
-[Unreleased]: https://github.com/FloMorphic/getting-started/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/FloMorphic/getting-started/compare/v0.4.1...HEAD
+[v0.4.1]: https://github.com/FloMorphic/getting-started/compare/v0.4.0...v0.4.1
 [v0.4.0]: https://github.com/FloMorphic/getting-started/compare/v0.3.9...v0.4.0
 [v0.3.9]: https://github.com/FloMorphic/getting-started/compare/v0.3.8...v0.3.9
 [v0.3.8]: https://github.com/FloMorphic/getting-started/compare/v0.3.7...v0.3.8
