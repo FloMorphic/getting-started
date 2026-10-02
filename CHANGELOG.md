@@ -16,7 +16,174 @@ component from the last recorded offset to its current `main`.
 ## [Unreleased]
 
 _Run `make changelog VERSION=<next>` to draft this section from the commits landed
-across all repos since v0.4.1._
+across all repos since v0.4.2._
+
+## [v0.4.2] — 2026-10-02
+
+A fast release for one feature: **a human task can be answered from Telegram**.
+The `humanInLoop` node has always parked a flow and waited for a person in the
+app — which means waiting for someone to *be* at the app. Pointing the node's
+**channel** at `telegram` holds the same conversation in a chat instead: the same
+facilitator, the same mission prompt, the same thread recorded on the task, so
+Human Tasks stays the record of what was said whichever channel delivered it, and
+closing the task is what releases the parked run either way. FloMorphic holds **no
+bot token** — the bot is an account connected in OpenConnector, so the node names a
+connection, a bot and a chat rather than a credential, and every Telegram call is
+an action run as that connected account. The chat id may be written as a
+`{{$.path}}`, so a flow can put the question to whoever it just looked up.
+
+A chat has no buttons, so everything the app offers around the conversation had to
+become typeable: **`/done` ends the session** and is what releases a parked flow,
+`/status` reads back what has been asked and answered, `/help` explains what this
+conversation is. The bridge answers them, never the model — a model improvising a
+reply to `/done` would tell the person the workflow was released when nothing had
+happened. Delivery is **polled rather than webhooked**, because FloMorphic is
+deployed on-prem where Telegram generally cannot reach in, and the rate **follows
+the conversation** instead of running at a fixed cadence: 2s while someone is
+talking, 30s once a session has sat quiet for half an hour, and **no gateway calls
+at all** while no Telegram task is open. A session parked on a Friday costs ~7,000
+gateway calls by Monday instead of ~110,000.
+
+Alongside it, the canvas learned to **resolve a node's scope where the node is**:
+what that JSONPath actually selects in the document the flow last ran against,
+without leaving the editor for the context page and retyping the expression. And
+import stopped copying a settings profile's values onto a HITL node, which was
+**writing a provider token into the saved graph**.
+
+### Added
+
+- **Telegram as a served HITL channel, end to end.** A node with
+  `channel: telegram` records its task exactly as a `direct` one does and then
+  hands it to a bridge (`inflow/hitl_telegram.go`, one per process, started after
+  the runtime is up because closing a session resumes a parked flow): it opens the
+  conversation with the facilitator's first turn, polls the bot's updates through
+  OpenConnector, runs each reply through the same facilitator, mirrors **every
+  turn onto the task**, and closes it — releasing the flow — when the person says
+  `/done`. Two new routes serve the in-app channel explicitly, `POST
+  /hitl/id/:id/start` (the bot's first turn, idempotent) and `POST
+  /hitl/id/:id/chat`, and both answer **409** for a Telegram task: the bridge is
+  already driving that thread, and a second facilitator answering into one
+  transcript would make nonsense of it. `whatsapp` still compiles and still has no
+  bridge — such a task waits in the app. _(morph-api, morph-wapp)_
+- **Session commands, handled by the bridge rather than the model.** `/done`,
+  `/status` and `/help`, in `hitl/commands.go`. `/start` is accepted as an alias
+  for `/help` — Telegram renders it as a START button in a fresh chat and every
+  bot is expected to answer it — but it is not listed as a session control,
+  because nothing restarts. They are **not** in Telegram's `/` autocomplete:
+  registering them needs `setMyCommands`, which the gateway's telegram surface
+  does not expose, so the bridge states them itself by appending
+  `hitl.OpeningFooter` verbatim to the facilitator's opening turn. The mission
+  prompt also asks the model to mention `/done`, but that is a hope, not a
+  guarantee — and with no command menu, an opening turn that forgot to say it
+  would leave the person unable to end the session at all. _(morph-api)_
+- **A recipient directory, because the Bot API cannot list a bot's users.** A bot
+  only learns a chat exists when someone interacts with it, and that arrives once
+  on an update stream that is consumed and expires in ~24h — so a designer had
+  nothing to pick from and no way to find a chat id but to go hunting for it. The
+  bridge now writes every chat it hears from into a new `telegram_recipients`
+  table, durably, where the stream is not, and `POST
+  /hitl/telegram/recipients/discover` sweeps whatever is still pending into the
+  same place (listed by `GET /hitl/telegram/recipients`, forgotten one at a time
+  by `DELETE`). `discover` reads with **no offset**, which acknowledges nothing,
+  so it is safe to run while the bridge holds live sessions on that bot; the flip
+  side is that it only ever sees unconsumed updates, so finding nothing new is an
+  ordinary outcome and the directory it returns is still the whole answer.
+  _(morph-api, morph-wapp)_
+- **The node's Telegram panel in the canvas.** Picking `telegram` opens a delivery
+  binding: which Connect connection (hidden when the install has only one — naming
+  a choice of one is noise), which **connected bot**, fetched live from the gateway
+  because a binding is only worth offering if the gateway will honour it at run
+  time, and which chat, picked from that bot's known recipients with *discover*
+  beside it. A typed field takes a `{{$.path}}`, an `@channelname` or a raw id, and
+  turns itself on for a node whose chat is not one of the known recipients, so an
+  existing binding is never silently reinterpreted as "nothing selected". An
+  unreachable gateway is **shown, not thrown** — the editor keeps working and the
+  chat can still be typed — and a node with no recipient at all says so, since that
+  is the one thing that must be fixed before the session can be delivered. The
+  node's preview names the channel whenever it is not the in-app default, because
+  where the session is held changes who can answer it. _(morph-wapp)_
+- **A poll rate that follows the conversation.** A HITL conversation is not steady
+  traffic: it is short bursts of replies separated by long silence, and the silence
+  is the *point* — waiting on a person is what the node is for. A flat rate is
+  therefore wrong in both directions, so a ladder picks the interval from how long
+  the session has been quiet: 2s under a minute, 5s under five, 15s under thirty,
+  30s beyond that. On the first pass after a restart there is no in-memory
+  activity to read, so it is taken from the tasks themselves — a session touched
+  ten seconds ago resumes fast, one untouched for three days resumes slow — rather
+  than assuming every stale session an install ever parked is active. A flow
+  parking on a Telegram node **nudges the bridge awake** so the person hears from
+  the bot now rather than up to 20s later. One caution: a bot has a single update
+  stream, so do not point the `telegram-oc` plugin's *Get updates* action (or a
+  webhook) at a bot the bridge is holding a session on, or the two consumers will
+  steal each other's updates. _(morph-api)_
+- **A node's scope, resolved on the node.** A node's `scope` is a JSONPath into the
+  run context, and reading it meant leaving the canvas for the context page and
+  retyping the expression there. A node now offers the answer in place: it hands
+  its identity and scope to an opener the canvas provides, and the canvas resolves
+  it against **the context the flow last ran with** in one dialog it owns — a node
+  cannot host the dialog itself, since a dialog inside a Vue Flow node would ride
+  the canvas transform. The last run's document is resolved once per flow and
+  shared (`stores/lastRunContext`, invalidated when a run is launched, because the
+  run just started makes its context the new last one) rather than refetched by
+  every node that asks. The probe carries the two readings a designer flips between
+  constantly as one-click jumps — the node's scope ("what do I read") and that
+  scope plus its result key ("what did I write") — and a node that binds no key, a
+  Goto or a result not named yet, gets no chips at all, since there is no second
+  reading and a lone chip that re-seeds the expression already in the input is
+  noise. The button hides where there is nothing to resolve against: no backend
+  means no runs, so no last context. The context page still opens in a tab of its
+  own, because the editor may be holding unsaved graph edits a navigation would
+  discard. _(morph-wapp)_
+
+### Changed
+
+- **Human Tasks shows where a session is being held, and stops offering a second
+  way in.** A task on a messenger channel is driven by the bridge, which is
+  already talking to the person; the panel is the **record** of that conversation,
+  not a parallel one. So the thread shows and streams as turns arrive, but the
+  composer does not, replaced by a banner naming the chat the session is in and
+  the commands the person has there. Cards carry a channel chip whenever the
+  channel is not the in-app default, because that is when it tells you something:
+  who can answer it. Closing from the app still works, and still releases a parked
+  workflow. _(morph-wapp)_
+- **Closing a messenger task from the app tells the person it is over.** They are
+  otherwise left sitting in a chat waiting for a bot that will never speak again.
+  A failed send is logged and never fatal — the task *is* closed, and the flow
+  below it has to be released either way. _(morph-api)_
+- **The task list filters by flow.** `GET /hitl` takes `flowId`. _(morph-api)_
+
+### Fixed
+
+- **An imported HITL node stored its settings profile's values, including a
+  provider token.** v0.4.1 taught the server-side import paths to re-attach a
+  node's `settingsId` to the profile's values, because that is the only place the
+  compiler reads a plugin node's settings from. The HITL node is the one kind
+  where that is wrong: it compiles to an Extrinsic and the backend chat service
+  loads the profile **from the store, by id**, at conversation time — so copying
+  the values onto the node achieves nothing except writing a provider access token
+  into the saved graph. The editor has always kept them out (`referenceOnly` on
+  its settings selector); import now does the same, stripping the values up front
+  *before* any lookup, so no path through the resolver can leave them behind —
+  including a hand-written or third-party flowfile that arrived carrying them. The
+  profile's label is still resolved, since that is all such a node takes from it.
+  _(morph-api)_
+
+### Maintenance
+
+- `morph-api` pins `inflow-fusion` v0.3.8. _(morph-api)_
+- Test coverage for everything new on the backend: the bridge and its poll ladder,
+  the command handler, the session store, the recipient repository, and the
+  reference-only import path. _(morph-api)_
+
+### Baked from
+
+| Component           | Ref    | Commit    |
+| ------------------- | ------ | --------- |
+| `morph-api`         | `main` | `9481dd6` |
+| `morph-wapp`        | `main` | `77f3e3e` |
+| `builtin-plugins`   | `main` | `164ada5` |
+| `inflow-plugin-sdk` | `main` | `ca83561` |
+| `node-plugin-sdk`   | `main` | `d20bb3b` |
 
 ## [v0.4.1] — 2026-09-29
 
@@ -1061,7 +1228,8 @@ across the API, the canvas and both plugin SDKs.
 | `inflow-plugin-sdk` | `main` | `96d24b9` |
 | `node-plugin-sdk`   | `main` | `f50c101` |
 
-[Unreleased]: https://github.com/FloMorphic/getting-started/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/FloMorphic/getting-started/compare/v0.4.2...HEAD
+[v0.4.2]: https://github.com/FloMorphic/getting-started/compare/v0.4.1...v0.4.2
 [v0.4.1]: https://github.com/FloMorphic/getting-started/compare/v0.4.0...v0.4.1
 [v0.4.0]: https://github.com/FloMorphic/getting-started/compare/v0.3.9...v0.4.0
 [v0.3.9]: https://github.com/FloMorphic/getting-started/compare/v0.3.8...v0.3.9
