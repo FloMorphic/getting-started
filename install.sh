@@ -240,7 +240,24 @@ fetch() { # <url> <dest>
 
 # ── prerequisites ─────────────────────────────────────────────────────────────
 step "Checking prerequisites"
-command -v docker >/dev/null 2>&1 || die "docker is not installed or not on PATH."
+# Running inside WSL with no docker almost always means the same thing: Docker
+# Desktop is missing from Windows, or its WSL integration is off for this distro.
+# Neither can be fixed from in here, so point at the installer that can.
+in_wsl() { [ -n "${WSL_DISTRO_NAME:-}" ] || grep -qi microsoft /proc/version 2>/dev/null; }
+if ! command -v docker >/dev/null 2>&1; then
+  if in_wsl; then
+    die "docker is not available in this WSL distro.
+    The engine has to live on Windows (Docker Desktop, WSL 2 backend). From a
+    Windows PowerShell, run the Windows installer instead — it installs WSL and
+    Docker Desktop if needed, turns on WSL integration, then runs this script:
+
+      irm https://raw.githubusercontent.com/FloMorphic/getting-started/main/install.ps1 | iex
+
+    Already have Docker Desktop? Enable it for this distro:
+    Docker Desktop -> Settings -> Resources -> WSL integration -> ${WSL_DISTRO_NAME:-this distro}"
+  fi
+  die "docker is not installed or not on PATH."
+fi
 if docker compose version >/dev/null 2>&1; then
   DC="docker compose"
 elif command -v docker-compose >/dev/null 2>&1; then
