@@ -640,7 +640,10 @@ Step 'Install directory'
 # database, and SQLite's locking over the 9p bridge to the Windows filesystem is
 # both slow and a known source of "database is locked" corruption. Explorer can
 # still reach it at \\wsl$\<distro>\...
-$wslHome = (Wsl-Bash 'printf %s "$HOME"' ).Out
+# Wsl-Bash rejects double quotes, so $HOME is read by cd'ing into it rather than
+# by expanding it inside a quoted printf. A login shell may print a banner first,
+# so take the last line.
+$wslHome = ((Wsl-Bash 'cd && pwd').Out -split "`n")[-1]
 if (-not $wslHome) { $wslHome = "/home/$WslUser" }
 $defaultDir = "$wslHome/$DEFAULT_SUBDIR"
 
