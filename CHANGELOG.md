@@ -16,7 +16,227 @@ component from the last recorded offset to its current `main`.
 ## [Unreleased]
 
 _Run `make changelog VERSION=<next>` to draft this section from the commits landed
-across all repos since v0.4.2._
+across all repos since v0.4.3._
+
+## [v0.4.3] — 2026-10-06
+
+Two halves. **FloMorphic installs on Windows** — and so do the plugins written
+for it. And the **Jev node became the AI Decision node**: the same protocol, a
+second model behind it, and the evidence a decision rests on.
+
+FloMorphic is containers, and Docker on Windows is Docker Desktop on the WSL 2
+backend — so the prerequisite was never just "Docker", it was Docker *and* the
+Linux environment underneath it, which the one-liner could not install.
+[`install.ps1`](./install.ps1) is that missing step. It is **not a port of
+`install.sh`** — it is the step before it: it checks the host, asks before it
+installs anything, puts WSL 2 and Docker Desktop in place, and then runs the very
+same `install.sh` inside the distro, so Windows and Linux end up with one stack
+from one source of truth.
+
+A plugin is a different problem, because a plugin is **a process the user runs** —
+`go build`, `npm start`, `docker` — and two of those three are native on Windows.
+So the Windows path for a plugin is not a hand-off into WSL at all: the API now
+renders a real PowerShell installer and lifecycle helper beside the bash pair,
+with the same four steps and the same verbs, and the Extensions page offers
+whichever matches the machine the operator is on. **A plugin that installs on
+Linux installs on Windows**, with no WSL in the picture.
+
+The decision node, meanwhile, was named after a vendor. The protocol it speaks,
+`POST /v1/systemone`, is served by more than one model — TypeSafe's hosted **Jev**
+and **Laya**, which is open and runs locally — and the request is the same either
+way, so which one answers is a property of the **settings profile**, not of the
+node. The node is therefore renamed for what it does: **AI Decision**.
+Flows saved as `jev` keep compiling, keep their ports and keep their settings
+profile — nothing to migrate. And the node learned the other half of a real
+decision: the **evidence** it rests on. Retrieved chunks can be injected
+alongside the subject, and a question can cite the one it means by name, which is
+the difference between "decide on this text" and "decide on this case given these
+documents".
+
+One thing to check on upgrade: that node's **default endpoint has changed**. It
+used to default to `thejevai.com`, which is a third-party **aggregator** fronting
+several deciders behind one key; it now defaults to TypeSafe's own
+`api.typesafe.ai`. The aggregator is still a supported `url` — and still the only
+way to reach several of those models under one account — but it is now something
+a profile opts into rather than inherits, because a workflow product should not
+route a customer's state through an unaffiliated third party unless someone chose
+to. **Keys are not interchangeable between the two**, so a profile that was
+relying on the old default must now name that `url` explicitly beside its key.
+
+### Added
+
+- **`install.ps1` — FloMorphic installs on Windows.** One PowerShell line
+  (`irm …/install.ps1 | iex`) that puts the whole prerequisite chain in place and
+  then hands over to the Linux installer: the **Windows host** (build 19041+,
+  architecture, and an explicit warning when virtualization is off in firmware —
+  the classic silent WSL 2 failure), **WSL 2** (`wsl --install` with your
+  consent, Ubuntu when there is no distro, a WSL 1 distro converted, a clear "you
+  need to reboot, then re-run this" where one is needed), **Docker Desktop**
+  (winget, else the installer from docker.com; started, waited on, and with a
+  walk-through of *Settings → Resources → WSL integration* for the case where the
+  engine is up on Windows but invisible inside the distro), and finally
+  **`install.sh` itself**, run in the distro with every `FLOMORPHIC_*` and
+  platform env var you set in PowerShell forwarded through. Anything needing
+  administrator rights asks before relaunching itself elevated, `-Yes` /
+  `ASSUME_YES=1` makes the whole thing unattended, and the scriptblock form takes
+  parameters (`-Distro`, `-InstallDir`, `-Ref`, `-NoInstall` to check a host
+  without changing it). The stack lands in the **distro's own filesystem**
+  (`~/flomorphic`), not on `C:` — the SQLite database is bind-mounted, and SQLite
+  over the `/mnt/c` bridge is slow and prone to locking errors — while Docker
+  Desktop publishes the ports to Windows, so `http://localhost:8088` works in the
+  Windows browser with nothing else to configure. Docker Desktop is Docker Inc.'s
+  product under its own licence, so the script installs it only when you say yes.
+  _(getting-started)_
+- **A Windows installer for plugins, not a WSL hand-off.** `GET
+  …/extension/id/:id/install.ps1` and `…/ctl.ps1` are the PowerShell counterparts
+  of the existing `install.sh` / `ctl.sh` pair, rendering the same four steps in
+  the same order — clone, write the dotenv, drop the lifecycle helper, build and
+  start — with the same command surface
+  (`build`/`start`/`stop`/`restart`/`status`/`logs`) and the same dotenv, which is
+  the whole of what the SDK needs. `GET …/install` carries the Windows half under
+  `windows` alongside the bash fields, so a client can offer either. Three things
+  the bash version never had to care about: the generated script **never calls
+  `exit`** on a failure path, because under `irm | iex` that closes the operator's
+  PowerShell window with the error still unread (a throw caught by a wrapper does
+  it instead); the dotenv is written **UTF-8 with no BOM**, since PowerShell 5.1's
+  `Set-Content -Encoding UTF8` emits one and a BOM makes the first key
+  unparseable to every dotenv reader; and `stop` **kills the process tree**,
+  because `npm start` runs node as a child and stopping only npm would leave the
+  plugin itself connected to Infra. The credential file is locked down to the
+  installing account with `icacls`, and the control script is invoked through
+  `-ExecutionPolicy Bypass` so a default Restricted client does not fail the
+  install at its last step. _(morph-api)_
+- **The Extensions page offers the right shell.** A Linux/macOS ⟷ Windows toggle
+  on the install hand-off, guessed from the browser the operator is on — the
+  plugin usually runs on that same machine — and remembered, because whoever
+  installs one plugin from Windows will install the next one there too. Both
+  variants get the same reachable-URL correction behind a proxy, the copy block
+  names the shell to paste into, and *Read the script before running it* now also
+  shows the **lifecycle helper** the installer drops, which carries no credential
+  and is worth reading. An older API that sends no Windows half simply shows no
+  toggle. _(morph-wapp)_
+- **Evidence on the decision node — the retrieval half of a decision.** Rows of
+  `{source, text}`, both templates, so a retriever node upstream can hand each
+  chunk over by path. The service takes **no evidence parameter** — its body is
+  only `{model, state, questions}` — so the node folds the rows into the state it
+  sends, as `{"case": <state>, "evidence": [...]}`, and a question points at
+  either part by **backticked path** (`` `case.problem` ``,
+  `` `evidence[0].text` ``). With no rows the state is sent exactly as it was
+  before evidence existed, which is what makes the body contract backward
+  compatible. The drawer edits the rows in order and shows each one's citation
+  handle, because a question cites a chunk by index. One caution it states in
+  place: state and questions share one context budget (~64k tokens, state plus
+  the longest question inside ~32k) and accuracy *falls* as it fills with material
+  the questions do not need — retrieve, filter, then inject.
+  _(builtin-plugins, morph-api, morph-wapp)_
+- **Questions that carry their own reference data.** A question's `instructions`
+  may now be the API's structured form — the question in one field, the data it
+  cites in the others, referenced by backticked name — so the policy a question
+  tests against does not have to be pushed through the shared state. The drawer
+  does not ask anyone to write that object: it keeps the question as text and
+  collects **named reference rows** beside it, and the compiler assembles the two
+  (`question` is reserved for the text; a row with no name has no handle to be
+  cited by and is refused). An imported flow whose question already carries the
+  object form is **split back** into those two halves so the drawer shows all of
+  it, and a body that was hand-written or generated passes through untouched —
+  references are the drawer's way in, not the only one. Every string in a question
+  is a template: the instructions at any depth, each reference value, each
+  option's description. _(morph-api, morph-wapp, builtin-plugins)_
+- **A second System One model: a local Laya.** The profile is what chooses, since
+  Jev and Laya serve the same endpoint shape: leave the URL empty for the hosted
+  service (key required, model optional), or point it at a **local Laya** and name
+  the model it serves — where a key is usually not needed at all, so the API key
+  is **no longer a required field**. The model id *is* required whenever the URL
+  names its own endpoint: a local server does not know the hosted aliases, and
+  sending `jev-latest` to one would come back as a validation error from the far
+  side instead of a readable one from here. _(builtin-plugins, morph-wapp)_
+- **A retry budget on the decision profile.** How reliable an endpoint is — a
+  shared key against a rate-limited hosted service, a local Laya with nothing in
+  front of it — is a property of the connection rather than of the decision, so
+  it belongs to the profile, exactly as it does on the LLM and HTTP nodes.
+  `max_retries` is how many **further** attempts a failed call gets, and only for
+  the two statuses the service asks callers to back off on: **429** and **529**. A
+  401, a 422 or a malformed reply is returned at once, because a second identical
+  request cannot fix any of them. Between attempts the node waits for whatever
+  `Retry-After` asked for (both documented forms — a delay in seconds, or an HTTP
+  date), otherwise backing off exponentially from 500 ms, and either way **capped
+  at 8s**: a decision node sits on the hot path, and one that parks a flow for
+  minutes is not helping it. Each wait is reported as a progress frame, so a
+  retrying node reads as waiting rather than as hung. The field is deliberately a
+  pointer, because "decide once" and "unset" are different answers: absent takes
+  the default of 2, an explicit **0** turns retrying off for a flow where a late
+  decision is worse than no decision. The compiler ships it only when the profile
+  carries it, and the drawer's field stores no default of its own — the fallback
+  is the placeholder — so saving a profile never freezes today's number into it.
+  _(builtin-plugins, morph-api, morph-wapp)_
+
+### Changed
+
+- **The `jev` node is now `ai-decision` — "AI Decision" — and the old kind still
+  works.** New label, new histogram icon, new palette entry, new catalog and seed
+  rows, and the AI designer's preamble renamed throughout. A saved flow keeps the
+  type it was drawn with, so the old kind is carried deliberately at every layer
+  it touches: it resolves to the same node spec (so its ports, icon and drawer
+  survive), it lowers through the same compiler builder, it derives the same
+  ports, and a settings profile saved against `jev` resolves to the same schema.
+  The plugin's `PLUGIN_ID` is unchanged too, so **no redeploy and no row
+  migration** — one consequence being that an upgraded install's node registry
+  lists both the old *Jev* builtin and the new *AI Decision* one (the seed is
+  keyed by name, and the old row is not pruned); new nodes come from the new row,
+  and the stale one can be removed from the registry.
+  _(morph-api, morph-wapp, builtin-plugins)_
+- **The decision node defaults to TypeSafe's own API** (`api.typesafe.ai`, key
+  from `console.typesafe.ai`) instead of the `thejevai.com` aggregator it
+  defaulted to before. The two differ in more than a hostname: they bill
+  differently (per input token vs credits), they need their own keys, and an
+  aggregator wants a **vendor-prefixed** model id (`typesafe/jev-1.13`,
+  `convaiinnovations/laya`) where TypeSafe takes its own aliases — so a profile
+  only has to pair the right `url` with the right key, and the drawer's help text
+  now says which is which. Their replies differ too, and **both are decoded**:
+  TypeSafe returns the answer document flat, an aggregator wraps it in an envelope
+  — which is where `credits_used` and `elapsed_ms` come from, so a metered gateway
+  is still accounted for on the canvas — and a non-zero `code` on an HTTP 200 is
+  treated as a failure rather than as an answer. _(builtin-plugins, morph-wapp)_
+- **The plugin directory is `ai-decision/`** (package `decisionnode`), renamed
+  from `jev/`, which is the one thing that moves for anyone building the plugin
+  set from source. The image build picks it up as before. _(builtin-plugins)_
+- **`install.sh` says which half is actually missing inside WSL.** A missing
+  `docker` in a WSL distro almost always means the same two things — Docker
+  Desktop is not installed on Windows, or its WSL integration is off for this
+  distro — and neither can be fixed from inside the distro. So instead of "docker
+  is not installed or not on PATH", the script now names both causes, points at
+  the Windows one-liner that installs and wires them, and names the distro to tick
+  in *Settings → Resources → WSL integration*. _(getting-started)_
+- **The AI designer checks what it can now write.** An evidence row with no `text`
+  is an error (it would only spend the model's context budget), one with no
+  `source` a warning (a question cannot cite what has no name, and the answer
+  cannot record what decided it); a node with an empty state is no longer flagged
+  when it has evidence, since evidence alone is content enough to decide on; a
+  reference with no name, or one named `question`, is an error; and a structured
+  `instructions` object is no longer reported as missing instructions.
+  _(morph-wapp)_
+
+### Maintenance
+
+- Test coverage for everything new: the Windows installer and control script
+  renderers (quoting, here-string safety, BOM-less output), the decision node's
+  compiled body with its evidence rows and its optional retry field, and the
+  plugin's state assembly, variable resolution, question validation, wire shapes,
+  routing, retry budget, `Retry-After` parsing in both forms, backoff cap and the
+  two reply shapes. _(morph-api, builtin-plugins)_
+- The API README documents the install endpoints it had grown — `ctl.sh`
+  alongside the new `install.ps1` and `ctl.ps1` — and what is secret-bearing in
+  each. _(morph-api)_
+
+### Baked from
+
+| Component           | Ref    | Commit    |
+| ------------------- | ------ | --------- |
+| `morph-api`         | `main` | `edc72b6` |
+| `morph-wapp`        | `main` | `ec835c5` |
+| `builtin-plugins`   | `main` | `05c8bfc` |
+| `inflow-plugin-sdk` | `main` | `ca83561` |
+| `node-plugin-sdk`   | `main` | `d20bb3b` |
 
 ## [v0.4.2] — 2026-10-02
 
@@ -1228,7 +1448,8 @@ across the API, the canvas and both plugin SDKs.
 | `inflow-plugin-sdk` | `main` | `96d24b9` |
 | `node-plugin-sdk`   | `main` | `f50c101` |
 
-[Unreleased]: https://github.com/FloMorphic/getting-started/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/FloMorphic/getting-started/compare/v0.4.3...HEAD
+[v0.4.3]: https://github.com/FloMorphic/getting-started/compare/v0.4.2...v0.4.3
 [v0.4.2]: https://github.com/FloMorphic/getting-started/compare/v0.4.1...v0.4.2
 [v0.4.1]: https://github.com/FloMorphic/getting-started/compare/v0.4.0...v0.4.1
 [v0.4.0]: https://github.com/FloMorphic/getting-started/compare/v0.3.9...v0.4.0
