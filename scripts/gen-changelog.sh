@@ -49,6 +49,8 @@ PLUGINS_DIR="${PLUGINS_DIR:-$here/../builtin-plugins}"
 PSDK_DIR="${PSDK_DIR:-$here/../../inflow-plugin-sdk}"
 NSDK_DIR="${NSDK_DIR:-$here/../../node-plugin-sdk}"
 COOKBOOK_DIR="${COOKBOOK_DIR:-$here/../flow-cookbook}"
+CATALOG_DIR="${CATALOG_DIR:-$here/../../plugin-catalog}"
+WIKI_DIR="${WIKI_DIR:-$here/../../inflow-wiki}"
 
 # component key -> "on-disk dir|display name". Every FloMorphic repo whose commits
 # should roll up into a product release goes here. A missing checkout is skipped
@@ -60,8 +62,17 @@ declare -A COMPONENTS=(
   [plugin-sdk]="$PSDK_DIR|inflow-plugin-sdk"
   [node-sdk]="$NSDK_DIR|node-plugin-sdk"
   [cookbook]="$COOKBOOK_DIR|flow-cookbook"
+  # The plugin catalog is a knowledge base, not baked into the image — but what
+  # lands in it (an agent skill, a feasibility study, a new plugin entry) is part
+  # of the release for anyone building a plugin, and was being missed because the
+  # generator never looked at it.
+  [catalog]="$CATALOG_DIR|plugin-catalog"
+  # Same argument as the catalog: the book explains capabilities the code only
+  # implements, so a chapter landing is part of the release. The checkout is
+  # `inflow-wiki` on disk; the repo is Inflowenger/wiki.
+  [wiki]="$WIKI_DIR|inflow-wiki"
 )
-ORDER=(api wapp plugins plugin-sdk node-sdk cookbook)
+ORDER=(api wapp plugins plugin-sdk node-sdk cookbook catalog wiki)
 
 # --- find the previous release lock (highest version-sorted *.json) -----------
 prev_lock=""

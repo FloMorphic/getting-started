@@ -16,7 +16,381 @@ component from the last recorded offset to its current `main`.
 ## [Unreleased]
 
 _Run `make changelog VERSION=<next>` to draft this section from the commits landed
-across all repos since v0.4.3._
+across all repos since v0.4.4._
+
+## [v0.4.4] — 2026-10-10
+
+Three things, and the first one is not a feature of the product at all — it is a
+way of building for it.
+
+**A plugin for a service someone else already connected.** FloMorphic → Connect
+runs oomol **OpenConnector**, which covers a thousand-plus providers, and a
+plugin written against it is a **request builder that holds no credential**: the
+account is connected once, centrally, and the plugin asks the backend to run each
+OpenConnector action as that account. The backend is generic — it injects the auth
+header and forwards — so every piece of knowledge about the service lives in the
+plugin, which is exactly the part that used to be guesswork. The catalog now
+carries that knowledge as an **agent skill**, [`oc-plugin`](https://github.com/Inflowenger/plugin-catalog/blob/main/skills/oc-plugin/SKILL.md),
+with a script to pull a provider's live action contracts, so the usual integration
+cost — read the provider's API docs, write the auth, write the client, hold the
+secret — collapses into mapping a catalog you fetched. Four `-oc` plugins across
+three SDKs are already shipped as worked examples.
+
+**The AI Decision node speaks both decision protocols.** The space settled into
+two wire shapes, and a node locked to one of them is a node that has to be
+rewritten when a customer's model lives behind the other. So the shape is now a
+property of the **settings profile**: `provider: "systemone"` posts
+`/v1/systemone` (TypeSafe's Jev, a local Laya, OpenJev, Ollama's `nimble`, and
+Microsoft's `Microsoft-Decision-1` on Foundry), `provider: "decisions"` posts
+`/v1/decisions` (OpenAI's Decisions API on `gpt-6-luna`, and gateways
+implementing its shape). Nothing on the canvas differs between them — the
+questions, the options and the `<question>.<option>` port tags are identical — so
+a flow is re-pointed at a different decider by swapping its profile, with no
+redrawing. An absent `provider` means System One, which is what every profile did
+before the field existed.
+
+**And a job can now be stopped.** Until now a plugin job the runtime concluded
+kept running: the SDK lets it, deliberately, because a later run of that node may
+build on its progress. But that is the wrong answer for work that is *paid for*
+or holds something open — a model call nobody will read, an MCP session, a
+request on the wire — so the SDK grew the two pieces needed to opt in
+(**middleware**, and a **`jobstop` registry**), and four of the five builtin
+plugins took them. `cast` deliberately did not, and says why in its own source.
+The mirror image of that — work for which **outliving the flow is the feature** —
+is now a chapter of its own in the book.
+
+### Added
+
+- **★ `oc-plugin` — building an OpenConnector-backed plugin, as a procedure an
+  agent can follow.** An `-oc` plugin node is executed by oomol OpenConnector
+  through FloMorphic → Connect: the canvas node publishes on
+  `flomorphic.svc.oc.proxy`, the backend holds the OpenConnector token and
+  forwards to `/v1/*`, and the provider's API is reached as the connected
+  account. **The plugin therefore stores no provider credential and there is
+  nothing to paste** — a token inside an `-oc` plugin is a design error, not a
+  shortcut, which the skill states in those terms. What the plugin *does* own is
+  all of the service knowledge, and the skill's rule zero is that this knowledge
+  must be **fetched, never remembered**: OpenConnector declares every curated
+  action's input with `additionalProperties: false` and camelCase property names
+  (`perPage`, `issueNumber`), so a plausible-looking field name is not a near
+  miss but a hard `400 invalid_input`, and a half-remembered action id is a `404
+  unknown_action`. Nor is the curated surface the size the provider's own API
+  suggests — `github` carries 147 actions while `jira` carries **7**, and
+  `jira.create_issue` wants only `summary`, not the `projectKey` the REST API
+  implies. Eight steps follow from that: get a runtime token (the developer's
+  job, and the skill supplies the words to ask with), pull the catalog, choose a
+  canvas surface that is *fewer and task-shaped* than oomol's list, build the
+  request (`{"input": {…}}` for a curated action, `{endpoint, method, query,
+  headers, body}` with a relative endpoint for the provider proxy), keep the
+  connection on the settings profile, generate the forms from the `inputSchema`
+  and then edit them, register the four meta RPCs every `-oc` plugin wants, and
+  list it with its `hostDependency`. _(plugin-catalog)_
+- **`oc_catalog.py` — the catalog, small enough to reason about.** A stdlib-only
+  helper with five subcommands — `services`, `list` (one line per action, with
+  `--type` and `--grep`), `search` (ranked, for a provider with 140+ actions),
+  `show` (one action's full input contract), `save` (raw JSON, for diffing a
+  deployment later). It exists because the honest way to build one of these is to
+  read the live contracts, and a raw 147-action response is not readable. It also
+  **probes the `authorization` header both ways**, because the form is not the
+  same on every deployment: hosted oomol issues `api-…` keys and accepts them
+  bare *or* behind `Bearer`, while a self-hosted open-source runtime parses the
+  scheme and reads no token at all without `Bearer `. _(plugin-catalog)_
+- **`skills/` is a third top-level part of the catalog**, beside `plugins/` and
+  `docs/`, with the division of labour written down: a **language** skill ships
+  with its SDK and stays the authority on the API, while a skill about a *kind*
+  of plugin lives in the catalog and layers on top. `build-a-plugin.md` routes to
+  it ("the service is already in oomol OpenConnector"), `plugins/README.md`
+  explains the `-oc` suffix, and `sdks.md` records the rule for the next one.
+  _(plugin-catalog)_
+- **A second decision protocol on the AI Decision node: the Decisions API.**
+  `provider: "decisions"` posts `/v1/decisions` to OpenAI's Decisions API
+  (`gpt-6-luna`, the only model it serves in public beta) or to a gateway
+  implementing the same shape — Vercel's AI Gateway does, and routes Jev through
+  it as well, which is why the field names the **protocol and not the vendor**: a
+  `provider: "openai"` enum would have aged badly the day a gateway started
+  answering the same body, so vendor names are accepted only as aliases. The
+  whole protocol-dependent surface is one `dialect` interface — path, default
+  host, default model, request encoding, reply decoding, retry policy, score
+  ceiling — and everything else in the plugin is written once against neutral
+  answer types and never learns which service replied. Only the encoding differs:
+  `state` becomes `input`, the questions object becomes an array keyed by `name`,
+  `noul` becomes `predicate` (which takes no criteria field, so a noul's option
+  descriptions are folded into the question text), choice criteria become
+  `choices`, score criteria become `levels`, and the answers come back as an
+  array. A third protocol is another implementation of that interface, which is
+  the same shape the LLM node's provider layer already has.
+  _(builtin-plugins, morph-api, morph-wapp)_
+- **Microsoft-Decision-1 on Microsoft Foundry — a System One service, not a third
+  protocol.** Per Microsoft's announcement (2026-10-09), `Microsoft-Decision-1`
+  is a post-trained Qwen3.5-9B — the same base family as Ollama's `nimble` —
+  scoring declared options with a calibrated probability each over a 32,768-token
+  input, and Foundry serves it with System One's request and reply bodies
+  verbatim. So it needs no `provider` of its own, and two things that are easy to
+  get wrong both live in the profile: the route hangs off the **resource root**
+  at `/providers/microsoft/v1/systemone`, *not* under the `/openai/v1` base
+  Foundry's chat models use, so the profile's `url` carries that prefix and
+  nothing else; and `model` is the **deployment name** (`decision-1`), because
+  Azure reserves the catalog id, which the reply reports back instead. Both are
+  pinned by a test against a live deployment's response. The plugin README is
+  explicit that the wire format comes from the Foundry portal's own capture
+  rather than from published documentation, names the one thing that would need
+  adding if a tenant ever rejected the bearer form, and notes that Microsoft
+  intends to rebase the model — which changes what answers, not how it is asked.
+  _(builtin-plugins)_
+- **Middleware in the Go SDK — functions that run before a job is accepted.**
+  `Action.Middleware` (built with `sdkv1.Use`) and `Plugin.Use` for every action,
+  each function taking the job's context so far and returning it for the next,
+  and in the end for the handler via the new **`Job.Context()`**. The ordering is
+  the whole point: middleware runs *before* the SDK replies the jobId to the
+  runtime, so whatever a function registers under that jobId is in place before
+  anything — a stop, a query from a later run — can arrive for it. Returning an
+  error rejects the request, and the runtime gets the error instead of a jobId; a
+  panic is recovered and rejected the same way. The jobId itself is now the first
+  middleware function (`sdkv1.JobID`), which **`WithJobID` can replace** for a
+  plugin that names its jobs with an external service's own id — the subject of
+  the new `external-job-identity.md`. _(inflow-plugin-sdk)_
+- **`jobstop` — a job that stops with its flow.** A registry built from the SDK's
+  public pieces only, composed in by the plugin: `Stops.Middleware` on the action
+  files each job by jobId as it is accepted, `Stops.OnSignal` on the plugin's
+  signal port cancels the one a conclusion is about, and the handler's
+  `job.Context()` ends with a cause it can read (`ErrStopped` and friends). It is
+  **opt-in per action**, because an accepted job running on is the SDK's
+  deliberate default. Isolation is by jobId *alone*: the runtime publishes
+  process signals on one subject per plugin, so every process sees every signal
+  of that plugin — other flows' jobs, and other replicas' jobs this process never
+  accepted — and a signal for a job the registry does not hold is the ordinary
+  case and does nothing. _(inflow-plugin-sdk)_
+- **`ChainSignals` and `LogSignals`.** `Plugin.OnSignal` takes one handler, so
+  composing is how a plugin both logs the port and acts on it:
+  `ChainSignals(LogSignals("http"), Stops.OnSignal)`. A panic in one handler is
+  recovered so it cannot keep a cancellation after it from seeing the signal.
+  `LogSignals` prints one line per signal as it arrives, which is the signal
+  *arriving* — `jobstop` logs the cancel it actually performed separately, and
+  the two lines together read as what the runtime said and what this process did
+  about it. Registering a cancellation handler alone used to silently replace the
+  default handler, and with it the only sight of the port; chaining keeps it.
+  _(inflow-plugin-sdk)_
+- **The builtin plugins stop with their flow.** `llm` (`run`) cuts the streamed
+  model call and any retry backoff; `mcp` (`run`, `call_tool`) cuts the MCP
+  session, the model call and the remaining tool calls and turns, taking no
+  further turn after a stop lands between two; `ai-decision` (`run`) cuts the
+  decision call and any retry wait; `http` (`run`) cuts the request in flight and
+  any `Retry-After` or backoff wait. In every case a stopped handler **returns
+  without reporting**: the runtime has concluded the process and stopped
+  listening, so a `Done` or `DoneWithError` sent then would only wait out the
+  SDK's retries before being discarded. Two limits are stated rather than papered
+  over — a stop cannot unsend a request already on the wire (whether the server
+  acted is not knowable from this end, the same caveat retrying carries), and
+  `mcp`'s `getToolsList` is not a job and keeps its own 20s deadline, so it stays
+  plain. _(builtin-plugins)_
+- **Two design docs for work that outlives its flow.** `detached-work.md` — the
+  plugin as an async function and the flow as **observer**: a six-hour graph
+  build cannot fit inside a run, so the plugin returns the work's *state*
+  immediately, the process finishes normally, and a later run of the same node
+  picks the story up and routes to a different branch when it is done. It opens
+  with the three budgets that make waiting impossible (the 15s accept, the idle
+  window, the run's `ExecuteTimeOut`) and the point that **nothing in the runtime
+  knows about any of this** — there is no async node and no job type, only a
+  plugin deciding its own temporal shape. `external-job-identity.md` — running the
+  job under the *service's* id instead of keeping a map between two id spaces,
+  which buys one correlation id end to end, cancellation that reaches the service,
+  and resumability across runs. _(inflow-plugin-sdk)_
+- **The book has a chapter on long-running work** —
+  *[Long-running work: the plugin decides its own time](https://github.com/Inflowenger/wiki/blob/main/book/03-plugins/long-running-work.md)*,
+  in Part III beside *Jobs and commands*. It is the platform-level account of
+  what the two SDK docs above describe mechanically, and its argument is that
+  **asynchrony is not a node type**: a plugin node already carries the three
+  mechanisms the case needs — a two-phase handshake, so the plugin decides what
+  the job *is* before the runtime is told about it; a node memory (`_registry`)
+  that lives in the context document rather than in a process; and routing from
+  inside a job (`next_tags`), so a job can say *not yet* and hand the branch
+  elsewhere. It opens with the three budgets that rule waiting out (the 15s
+  accept, the node's `idle_min`, the run's `ExecuteTimeOut`), then walks one
+  action end to end — adopt the previous run's handle at the accept stage *only if
+  the service still holds that work*, report state, route a `pending` port, finish
+  in seconds — and shows the six-hour shape across three runs with **nothing
+  pinned open between them**: no goroutine, no held connection, no timer thread.
+  Three points in it are worth knowing even if the chapter is never read: *Still
+  running* is a **success**, because the node succeeded while the work did not
+  finish and those are different facts; the state snapshot must be **committed**
+  to the node's scope, not merely reported, or the next run finds nothing; and
+  `doneAt`/`conclusion` describe the **run**, not the work, which is the trap in
+  every dedup scheme built on them. It also states plainly where this cuts against
+  the release's other half — **detached work usually must not be stopped**, since
+  a user stopping a flow does not mean discarding four hours of upstream
+  construction, so an observer action takes no stop middleware and the three
+  things people actually want from "cancel" get three different mechanisms (stop
+  middleware, an explicit upstream abort on a cancelling signal, or a TTL/sweeper
+  for work nobody will ever collect — the honest answer for most deployments).
+  The plugin overview and *Jobs and commands* now route into it, and it is in
+  `SUMMARY.md`. _(inflow-wiki)_
+
+### Changed
+
+- **`provider` leads the decision settings form**, as a two-option Protocol
+  select, and the rest of the form reads per-protocol: the API key placeholder
+  and help name both hosts and say plainly that **keys are not interchangeable**
+  between them; Model carries no default at all, since a seeded one would freeze
+  one protocol's id into a profile that later switches to the other — the
+  per-protocol fallback is the placeholder instead (`jev-latest` · `gpt-6-luna`),
+  the same way `max_retries` already did it; Base URL names each protocol's own
+  host and still makes Model required once it is set, because neither a local
+  server nor a gateway knows the other side's aliases. _(morph-wapp)_
+- **The node's `_exception` port reports *which* failure it was.** `code` is now
+  one of `provider_error`, `no_answer`, `unbound_option`, `refused` or
+  `low_confidence`. `refused` is new behaviour and belongs to the Decisions API
+  alone: that model **may decline a single question while answering the rest**,
+  keeping the refused one in its position, so a refused question has no answer
+  and therefore no port, and a routed one leaves through `_exception`. System One
+  cannot decline — when the state fits no option it still picks one, which is why
+  declaring an `other` option is the visible no-match branch there — and
+  declaring `other` does **not** prevent a refusal, so a flow that must survive
+  one needs the `_exception` branch actually drawn. _(builtin-plugins, morph-api)_
+- **The node no longer calls its probabilities "calibrated."** The word is gone
+  from the node description, the catalog, the seed row and the drawer, because it
+  is a claim about a particular service rather than about the protocol, and the
+  node now speaks to several. The min-confidence tooltip says what the number
+  actually is in its place — a measure of **how decisive the distribution is, not
+  of how often it is right** — and warns to **re-tune the floor when a profile is
+  pointed at another service**, since a threshold tuned against hosted Jev means
+  something different against `gpt-6-luna` or a local decider. Worth a look at any
+  flow carrying a non-zero `min_confidence` before switching its profile.
+  _(builtin-plugins, morph-api, morph-wapp)_
+- **Retry is per protocol.** 429 and 529 on System One, as before; 429 and **any
+  5xx** on the Decisions API, which is what OpenAI's own SDKs retry — a decision
+  call reads a state and returns a distribution, so re-sending one is safe in the
+  sense that matters. A bad key or a validation error is still never retried, and
+  the budget is still the profile's `max_retries` (default 2, `0` to decide once).
+  _(builtin-plugins, morph-wapp)_
+- **The decision node's array limits are enforced before the call, with an error
+  that names the array.** At most 64 `questions` and 64 `evidence` rows per node,
+  255 choice options, and 2–10 score levels — 26 against a local Ollama decider,
+  since that ceiling is a property of the endpoint and not only of the protocol.
+  Exceeding one is almost always a loop or a bad `{{$.path}}` upstream rather than
+  an intended design, so it fails here with a plain message instead of as a
+  validation error from the far side, and the advice is to split the work across
+  nodes rather than raise the count. _(builtin-plugins, morph-api)_
+- **`provider` is kept in the compiled body even when empty.** A settings profile
+  is snapshotted onto a node when it is applied, so a flow compiled before this
+  field existed carries no `provider` and must keep reaching the same service —
+  an absent key travels as `""`, which the plugin reads as System One. Dropping
+  an empty value from the projection instead would have been worse than
+  cosmetic: a profile that selected `decisions` would have silently compiled to a
+  System One body and the node would have posted it to OpenAI.
+  _(morph-api)_
+- **The node-plugin-sdk skill learned the three things it kept getting wrong.**
+  Paths may start at **`$this`** — inflow's non-standard root for the location
+  this run was handed, the slice the node's `scope` selected — which is the right
+  answer wherever a hardcoded index was being written. A plugin page can carry a
+  Markdown **manual** on `p.intro({ manual })`, and a fenced `inflow-meta` block
+  naming a meta method becomes a Run button. And a new *known limitations*
+  section states what cannot be done, so it stops being attempted: a form action
+  **cannot mutate the schema** — answers are patched into form *data* only, so a
+  `<select>`'s `enum` cannot be populated at runtime (model a picker as free text
+  plus a resolve button, or as an array field filled from a returned list), and
+  nothing fires automatically — no on-change, no debounce, no type-ahead. Both
+  SDK skills and both cookbooks also now point at the plugin catalog as the live
+  knowledge base and at the shipped plugins as the worked examples.
+  _(node-plugin-sdk, inflow-plugin-sdk)_
+- **fractal-core runs JavaScript on V8, with a pooled isolate — between 2.4× and
+  65× the throughput depending on the script.** The engine's JS execution moved
+  off quickjs, and the **JS code node** and the **contract node** are the two
+  places that feel it. Measured as aggregate scripts/second across all 24 cores,
+  against quickjs: a **tiny script** — what most nodes actually carry — goes
+  1,402 → **14,685** (10.5×); a **20k string build** 61 → **3,968** (65×); a
+  **2M-iteration loop** 499 → 1,174 (2.4×). A second, independent harness (64
+  goroutines, timed end to end) agrees at **8.7×** overall. Go allocations per
+  pass fall from 82 / 13.4 KB to **46 / 1.8 KB**.
+  The finding behind those numbers is that **quickjs anti-scales**. A tiny script
+  takes 153 µs sequentially — some 6,500/s on one core — yet 24 cores deliver
+  only ~1,400/s: about **4.7× worse under concurrency**, and string work degrades
+  furthest (3.25 ms sequential becomes 16.4 ms under load). V8 scales positively
+  instead. So a sequential benchmark was simply the wrong instrument here, and the
+  "V8 pooled is 13% slower on tiny scripts" it produced is true in isolation and
+  irrelevant in production.
+  Two caveats worth carrying: for the **compute-heavy loop** a per-pass isolate
+  beats the pool (619 µs vs 852 µs), because a reused isolate carries accumulated
+  heap and collects more — `GetV8Vm` stays exported for a node that wants that
+  trade. And memory is cheaper than expected — 24 live isolates add about **10
+  MiB RSS**, since the 256 MiB heap figure is a **cap, not a reservation**.
+  _(fractal-core)_
+- **`plugin-catalog` and `inflow-wiki` are now tracked release components.**
+  What lands in the catalog — an agent skill, a feasibility study, a plugin entry
+  — is part of the release for anyone building a plugin, and a chapter of the book
+  explains a capability the code only implements; both were being missed because
+  `gen-changelog.sh` never looked at either repo. Their baseline offsets are
+  recorded below; from v0.4.5 they diff like every other component.
+  _(getting-started)_
+
+### Fixed
+
+- **The AI Decision drawer told the author the model cannot decline, and never
+  said what the exception port actually does.** Three corrections, all of them
+  predating the protocol split, in the two help blocks a flow author reads while
+  building the node. The questions block said "it cannot decline — when nothing
+  fits it still picks one, so declare an `other` option": true on System One,
+  false on the Decisions API, where the model may refuse one question and answer
+  the rest. The advice was the harmful half, since an author who believes `other`
+  covers them does not wire the exception port a refusal needs; both halves of the
+  fork are now stated, since a routed refusal leaves through that port while one
+  with `route` off lets the run finish and is listed under `<key>.refused`. The
+  exception port's own block — the place an author learns what routes there —
+  listed only an API error, a missing answer and a below-floor confidence, so it
+  now also names an answer citing an undeclared option and a routed refusal, and
+  says what "an API error" means now that retries are per protocol (a 429, an
+  overload or a 5xx the profile's budget did not fix). And neither block said the
+  thing most likely to surprise someone: every exception **replaces** the tag set,
+  so when that port fires **no option port does** — including those of questions
+  that answered perfectly well. On a three-question node where one is refused, the
+  other two do not route. That is now stated as all-or-nothing, with the partial
+  answers travelling along. The same sentence was corrected in the catalog, the
+  node spec and the plugin README when the second protocol landed; the drawer was
+  missed. _(morph-wapp)_
+- **`install.ps1` reads the WSL home directory without double quotes.**
+  `Wsl-Bash` rejects them, so `printf %s "$HOME"` came back empty and the install
+  directory silently fell back to `/home/<user>`; it now reads the path with
+  `cd && pwd` and takes the **last** line, since a login shell may print a banner
+  first. _(getting-started)_
+
+### Maintenance
+
+- Test coverage for the whole protocol split: dialect selection including every
+  vendor alias, both wire encodings, both reply decodings, refusal handling as a
+  non-error that leaves its sibling answers undisturbed, per-protocol retry and
+  score ceilings, and a live-capture regression for the Foundry route and
+  deployment-name handling. Cancellation has its own test per plugin
+  (`cancel_test.go` in `ai-decision`, `http`, `llm`) plus the SDK's middleware,
+  signal, `jobstop` and detached/external-id integration suites.
+  _(builtin-plugins, inflow-plugin-sdk)_
+- `go-plugin-sdk` pinned from `v0.2.4` to **`v0.2.8`** across every builtin
+  plugin; `@inflowenger/node-plugin-sdk` published at **0.2.1** (from 0.1.9); the
+  `ai-decision` plugin reports itself as `v0.2.0`. Transitive bumps across all
+  five plugin modules, the transport among them: `nats.go` 1.52 → **1.54**,
+  `klauspost/compress` 1.18.5 → 1.20.0, and the `golang.org/x/*` set.
+  _(builtin-plugins, node-plugin-sdk)_
+- The catalog's roadmap records the SAST decision: **neither Joern nor CodeQL**.
+  Joern embeds far more cheaply than its 1.8 GB distribution suggests — 143 MB of
+  jars for eight languages, frontends verified running from a bare classpath — but
+  its console layer is install-bound, an embed needs a JVM SDK that does not
+  exist, and it ships 58 stock queries with none for Python, JS, Go, C# or Ruby.
+  CodeQL is ruled out on **licence**: no private-code or CI/CD use without paid
+  GitHub Advanced Security, and where a customer holds GHAS the `github-oc`
+  plugin already reads the alerts. The slot goes to **`SEMGREP`**, whose catch is
+  the opposite of Joern's — the engines are LGPL-2.1 but `semgrep-rules` is
+  licence-encumbered, so the plugin would ship the engine and a rule *loader*,
+  never the rules, in the shape nuclei's template catalog already uses. Joern
+  stays on the roadmap as an **expert** node, not a scanner. _(plugin-catalog)_
+
+### Baked from
+
+| Component           | Ref    | Commit    |
+| ------------------- | ------ | --------- |
+| `morph-api`         | `main` | `4adb0c4` |
+| `morph-wapp`        | `main` | `892a2f7` |
+| `builtin-plugins`   | `main` | `1daeff2` |
+| `inflow-plugin-sdk` | `main` | `4a641c8` |
+| `node-plugin-sdk`   | `main` | `b9d5b14` |
+| `plugin-catalog`    | `main` | `19744bd` |
 
 ## [v0.4.3] — 2026-10-06
 
@@ -1448,7 +1822,8 @@ across the API, the canvas and both plugin SDKs.
 | `inflow-plugin-sdk` | `main` | `96d24b9` |
 | `node-plugin-sdk`   | `main` | `f50c101` |
 
-[Unreleased]: https://github.com/FloMorphic/getting-started/compare/v0.4.3...HEAD
+[Unreleased]: https://github.com/FloMorphic/getting-started/compare/v0.4.4...HEAD
+[v0.4.4]: https://github.com/FloMorphic/getting-started/compare/v0.4.3...v0.4.4
 [v0.4.3]: https://github.com/FloMorphic/getting-started/compare/v0.4.2...v0.4.3
 [v0.4.2]: https://github.com/FloMorphic/getting-started/compare/v0.4.1...v0.4.2
 [v0.4.1]: https://github.com/FloMorphic/getting-started/compare/v0.4.0...v0.4.1
