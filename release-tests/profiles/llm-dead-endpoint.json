@@ -1,0 +1,14 @@
+{
+  "id": "nset_mv4nax1tc8hm74v3",
+  "nodeUniqId": "ext:aaaa-bbbb-cccc-llm0",
+  "nodeType": "llm",
+  "title": "LLM — dead endpoint (provider_error test)",
+  "settings": {
+    "access_token": "${LLM_DEAD_ENDPOINT_ACCESS_TOKEN}",
+    "max_retries": 1,
+    "model": "fake-local",
+    "provider": "openai-compatible",
+    "temperature": 0.3,
+    "url": "http://127.0.0.1:8771/v1"
+  }
+}

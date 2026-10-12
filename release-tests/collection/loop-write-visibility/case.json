@@ -1,0 +1,33 @@
+{
+  "flowId": "flow_relt_loopvis01",
+  "title": "Loop write visibility — a guard must see the state just written",
+  "proves": "A node's result is in the Context by the time its successor runs. The guard reads `q` and `i` written by the node immediately before it, and again on every pass through the back-edge, so the loop completes exactly 24 iterations.",
+  "since": "v0.4.6",
+  "tags": [
+    "engine",
+    "loop",
+    "write-visibility",
+    "fast"
+  ],
+  "repeat": 100,
+  "poll": 0.25,
+  "run": {
+    "stopOnError": false,
+    "executeTimeoutSec": 120,
+    "processNodeLimit": 400
+  },
+  "seedContext": {},
+  "requires": {
+    "profiles": [],
+    "services": []
+  },
+  "expect": {
+    "status": "finished",
+    "errorCount": 0,
+    "context": {
+      "done_report.i": 24,
+      "done_report.n": 24
+    }
+  },
+  "notes": "REGRESSION TEST for the defect found during v0.4.5 release testing. A node's result used to be handed to an unbuffered channel and applied by a consumer goroutine AFTER the send returned; in that window the task settled, its successor was queued, and the successor read the document without the write in it. The guard then saw `q` as empty, `undefined < 0` is false in JS, so it routed `done` on the first pass and the run finished in ~3ms reporting an empty result as a SUCCESS — status `finished`, zero errors.\n\nMeasured in fractal-core, A-B-A with a restart between arms: 22/400 runs wrong unpatched, 0/400 patched, 21/400 wrong when reverted. Two failure shapes, both silent: i=0 (guard exited on the first pass) and i=25 (guard read a stale counter and took an extra pass).\n\nrepeat is 100 BECAUSE the defect was intermittent at ~5% per run: a single run cleared it 95% of the time and told you nothing. 100 runs catches a 5% regression ~99.4% of the time. Each run is ~30ms of engine time, so the whole case costs well under a minute.\n\nNeeds no model, no plugin, no network and no secret — js and rule nodes only."
+}

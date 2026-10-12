@@ -1,0 +1,411 @@
+{
+  "flomorphic": {
+    "kind": "workflow",
+    "version": 1,
+    "exportedAt": "2026-10-12T15:40:41Z"
+  },
+  "title": "AI Decision bench — nimble (local Ollama)",
+  "nodes": [
+    {
+      "ref": "start",
+      "kind": "startNode",
+      "title": "Start",
+      "key": "",
+      "scope": "",
+      "position": {
+        "x": 120,
+        "y": 192
+      }
+    },
+    {
+      "ref": "reset-state-build-queue",
+      "kind": "js",
+      "title": "Reset state & build queue",
+      "key": "",
+      "scope": "",
+      "position": {
+        "x": 484,
+        "y": 191.75
+      },
+      "data": {
+        "logic_rule": "let src = input.cases || []\nlet reps = input.reps || 1\nlet queue = []\nlet r = 1\nwhile (r <= reps) {\n  src.forEach(function (c) {\n    queue.push({ id: c.id + '#' + r, base: c.id, expect: c.expect, acceptable: c.acceptable, text: c.text })\n  })\n  r = r + 1\n}\nlet fresh = { i: 0, results: [], report: null, queue: queue }\nfresh"
+      }
+    },
+    {
+      "ref": "more-cases",
+      "kind": "rule",
+      "title": "More cases?",
+      "key": "loop_state",
+      "scope": "",
+      "position": {
+        "x": 848,
+        "y": 161
+      },
+      "data": {
+        "handlers": [
+          {
+            "id": "h1",
+            "name": "next",
+            "tags": [
+              "next"
+            ],
+            "title": "Next case"
+          },
+          {
+            "id": "h2",
+            "name": "done",
+            "tags": [
+              "done"
+            ],
+            "title": "Done"
+          }
+        ],
+        "logic_rule": "let queue = input.queue || []\nlet decision = input.i < queue.length ? 'next' : 'done'\ndecision"
+      }
+    },
+    {
+      "ref": "lift-current-case",
+      "kind": "js",
+      "title": "Lift current case",
+      "key": "current",
+      "scope": "",
+      "position": {
+        "x": 1212,
+        "y": 264
+      },
+      "data": {
+        "logic_rule": "let queue = input.queue || []\nlet current = queue[input.i] || null\ncurrent"
+      }
+    },
+    {
+      "ref": "have-a-case",
+      "kind": "rule",
+      "title": "Have a case?",
+      "key": "have_case_state",
+      "scope": "",
+      "position": {
+        "x": 1576,
+        "y": 233
+      },
+      "data": {
+        "handlers": [
+          {
+            "id": "h1",
+            "name": "yes",
+            "tags": [
+              "yes"
+            ],
+            "title": "Have a case"
+          },
+          {
+            "id": "h2",
+            "name": "no",
+            "tags": [
+              "no"
+            ],
+            "title": "Out of range"
+          }
+        ],
+        "logic_rule": "let c = input.current\nlet decision = c && c.id ? 'yes' : 'no'\ndecision"
+      }
+    },
+    {
+      "ref": "triage-decision-nimble",
+      "kind": "ai-decision",
+      "title": "Triage decision (nimble)",
+      "key": "decision",
+      "scope": "",
+      "position": {
+        "x": 1940,
+        "y": 263
+      },
+      "data": {
+        "body": {
+          "state": "{{$.current.text}}"
+        },
+        "questions": [
+          {
+            "id": "category",
+            "instructions": "Which team should handle this support message? Choose the single best fit for what the customer actually needs resolved.",
+            "min_confidence": 0,
+            "options": [
+              {
+                "description": "Payments, invoices, charges, refunds, pricing or what a subscription costs.",
+                "id": "opt-2d10ca71-0",
+                "name": "billing"
+              },
+              {
+                "description": "The product is broken or misbehaving: crashes, errors, outages, bugs, corrupted or missing data.",
+                "id": "opt-20fdc261-1",
+                "name": "technical"
+              },
+              {
+                "description": "The customer cannot get into their account: login failures, password resets, lockouts, two-factor problems.",
+                "id": "opt-052ac43d-2",
+                "name": "account_access"
+              },
+              {
+                "description": "None of the above — sales enquiries, job applications, partnership offers, general feedback.",
+                "id": "opt-bfaa4fa3-3",
+                "name": "other"
+              }
+            ],
+            "references": [],
+            "route": true,
+            "type": "choice"
+          },
+          {
+            "id": "urgency",
+            "instructions": "How urgently does this message need a reply? Judge by business impact and how blocked the customer is, not by how upset the writer sounds.",
+            "min_confidence": 0,
+            "options": [
+              {
+                "description": "Nobody is blocked. Can wait several days.",
+                "id": "opt-9761b10b-0",
+                "name": "low"
+              },
+              {
+                "description": "A real problem with a workaround, or a routine request. Answer within a day.",
+                "id": "opt-566de4cf-1",
+                "name": "normal"
+              },
+              {
+                "description": "The customer is blocked from using the product, or money is at stake. Answer within hours.",
+                "id": "opt-1d7d592a-2",
+                "name": "high"
+              },
+              {
+                "description": "Widespread outage, data loss, or legal and financial exposure. Answer immediately.",
+                "id": "opt-c513fa30-3",
+                "name": "critical"
+              }
+            ],
+            "references": [],
+            "route": false,
+            "type": "score"
+          },
+          {
+            "id": "needs_human",
+            "instructions": "Does this message need a human agent, rather than an automated reply or a help-centre article?",
+            "min_confidence": 0,
+            "options": [
+              {
+                "description": "It needs judgement, an account change, or a back-and-forth conversation.",
+                "id": "opt-d23cf792-0",
+                "name": "yes"
+              },
+              {
+                "description": "A templated answer or a help-centre link would fully resolve it.",
+                "id": "opt-a95290ff-1",
+                "name": "no"
+              }
+            ],
+            "references": [],
+            "route": false,
+            "type": "noul"
+          }
+        ],
+        "settingsId": "nset_mv1d53q3941qfx1t"
+      }
+    },
+    {
+      "ref": "port-billing",
+      "kind": "js",
+      "title": "Port: billing",
+      "key": "fired_port",
+      "scope": "",
+      "position": {
+        "x": 2304,
+        "y": 121
+      },
+      "data": {
+        "logic_rule": "let firedPort = 'category.billing'\nfiredPort"
+      }
+    },
+    {
+      "ref": "port-technical",
+      "kind": "js",
+      "title": "Port: technical",
+      "key": "fired_port",
+      "scope": "",
+      "position": {
+        "x": 2304,
+        "y": 264
+      },
+      "data": {
+        "logic_rule": "let firedPort = 'category.technical'\nfiredPort"
+      }
+    },
+    {
+      "ref": "port-account-access",
+      "kind": "js",
+      "title": "Port: account_access",
+      "key": "fired_port",
+      "scope": "",
+      "position": {
+        "x": 2304,
+        "y": 407
+      },
+      "data": {
+        "logic_rule": "let firedPort = 'category.account_access'\nfiredPort"
+      }
+    },
+    {
+      "ref": "port-other",
+      "kind": "js",
+      "title": "Port: other",
+      "key": "fired_port",
+      "scope": "",
+      "position": {
+        "x": 2304,
+        "y": 550
+      },
+      "data": {
+        "logic_rule": "let firedPort = 'category.other'\nfiredPort"
+      }
+    },
+    {
+      "ref": "port-exception",
+      "kind": "js",
+      "title": "Port: _exception",
+      "key": "fired_port",
+      "scope": "",
+      "position": {
+        "x": 2304,
+        "y": 693
+      },
+      "data": {
+        "logic_rule": "let firedPort = '_exception'\nfiredPort"
+      }
+    },
+    {
+      "ref": "record-result",
+      "kind": "js",
+      "title": "Record result",
+      "key": "results",
+      "scope": "",
+      "position": {
+        "x": 2668,
+        "y": 407
+      },
+      "data": {
+        "logic_rule": "let d = input.decision || {}\nlet a = d.answers || {}\nlet pick = function (q) {\n  let r = a[q] || {}\n  return { answer: r.answer, confidence: r.confidence }\n}\nlet c = input.current || {}\nlet row = {\n  id: c.id,\n  base: c.base,\n  expect: c.expect,\n  acceptable: c.acceptable,\n  fired_port: input.fired_port,\n  category: pick('category'),\n  urgency: pick('urgency'),\n  needs_human: pick('needs_human')\n}\nlet prior = input.results || []\nlet seen = prior.filter(function (r) { return r.id === row.id })\nlet results = seen.length ? prior : prior.concat([row])\nresults"
+      }
+    },
+    {
+      "ref": "next-index",
+      "kind": "js",
+      "title": "Next index",
+      "key": "i",
+      "scope": "",
+      "position": {
+        "x": 3032,
+        "y": 407
+      },
+      "data": {
+        "logic_rule": "let i = input.i + 1\ni"
+      }
+    },
+    {
+      "ref": "score-the-run",
+      "kind": "js",
+      "title": "Score the run",
+      "key": "report",
+      "scope": "",
+      "position": {
+        "x": 1940,
+        "y": 120
+      },
+      "data": {
+        "logic_rule": "let rows = input.results || []\nlet cat = function (r) { return (r.category || {}).answer }\nlet urg = function (r) { return (r.urgency || {}).answer }\nlet hum = function (r) { return (r.needs_human || {}).answer }\nlet ok = function (r) {\n  let got = cat(r)\n  if (r.acceptable && r.acceptable.length) { return r.acceptable.indexOf(got) >= 0 }\n  return got === r.expect\n}\nlet bases = []\nrows.forEach(function (r) { if (bases.indexOf(r.base) < 0) { bases.push(r.base) } })\nlet uniq = function (xs) {\n  let out = []\n  xs.forEach(function (x) { if (out.indexOf(x) < 0) { out.push(x) } })\n  return out\n}\nlet stability = bases.map(function (b) {\n  let reps = rows.filter(function (r) { return r.base === b })\n  let cats = uniq(reps.map(cat))\n  let urgs = uniq(reps.map(urg))\n  let confs = reps.map(function (r) { return (r.category || {}).confidence || 0 }).sort(function (x, y) { return x - y })\n  return {\n    base: b,\n    expect: reps[0].expect,\n    reps: reps.length,\n    category: cats,\n    category_stable: cats.length === 1,\n    conf_min: confs[0],\n    conf_max: confs[confs.length - 1],\n    urgency: urgs,\n    urgency_stable: urgs.length === 1,\n    needs_human: uniq(reps.map(hum)),\n    all_reps_correct: reps.filter(ok).length === reps.length\n  }\n})\nlet scorable = rows.filter(function (r) { return r.expect !== 'ambiguous' })\nlet humAll = uniq(rows.map(hum))\nlet report = {\n  rows: rows.length,\n  distinct_cases: bases.length,\n  category_accuracy_all_reps: scorable.length ? scorable.filter(ok).length / scorable.length : 0,\n  unstable_category: stability.filter(function (s) { return !s.category_stable }).map(function (s) { return s.base }),\n  unstable_urgency: stability.filter(function (s) { return !s.urgency_stable }).map(function (s) { return s.base }),\n  needs_human_distinct_answers: humAll,\n  exceptions: rows.filter(function (r) { return r.fired_port === '_exception' }).length,\n  routing_mismatches: rows.filter(function (r) { return r.fired_port !== 'category.' + cat(r) }).length,\n  stability: stability\n}\nreport"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "reset-state-build-queue",
+      "to": "more-cases"
+    },
+    {
+      "from": "start",
+      "to": "reset-state-build-queue"
+    },
+    {
+      "from": "more-cases",
+      "to": "lift-current-case",
+      "port": "next"
+    },
+    {
+      "from": "more-cases",
+      "to": "score-the-run",
+      "port": "done"
+    },
+    {
+      "from": "lift-current-case",
+      "to": "have-a-case"
+    },
+    {
+      "from": "have-a-case",
+      "to": "triage-decision-nimble",
+      "port": "yes"
+    },
+    {
+      "from": "have-a-case",
+      "to": "score-the-run",
+      "port": "no"
+    },
+    {
+      "from": "triage-decision-nimble",
+      "to": "port-billing",
+      "port": "category.billing"
+    },
+    {
+      "from": "triage-decision-nimble",
+      "to": "port-technical",
+      "port": "category.technical"
+    },
+    {
+      "from": "triage-decision-nimble",
+      "to": "port-account-access",
+      "port": "category.account_access"
+    },
+    {
+      "from": "triage-decision-nimble",
+      "to": "port-other",
+      "port": "category.other"
+    },
+    {
+      "from": "triage-decision-nimble",
+      "to": "port-exception",
+      "port": "_exception"
+    },
+    {
+      "from": "port-billing",
+      "to": "record-result"
+    },
+    {
+      "from": "port-technical",
+      "to": "record-result"
+    },
+    {
+      "from": "port-account-access",
+      "to": "record-result"
+    },
+    {
+      "from": "port-other",
+      "to": "record-result"
+    },
+    {
+      "from": "port-exception",
+      "to": "record-result"
+    },
+    {
+      "from": "record-result",
+      "to": "next-index"
+    },
+    {
+      "from": "next-index",
+      "to": "more-cases"
+    }
+  ]
+}

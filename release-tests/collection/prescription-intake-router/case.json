@@ -1,0 +1,27 @@
+{
+  "flowId": "flow_mv47wlox3pbwmw3x",
+  "title": "Prescription intake router — LLM route decision (Nara-ai)",
+  "proves": "An llm node's five bound functions are five routes: the function the model calls is the edge the run takes. A line it cannot route leaves through _exception as a decision, without failing the node or stopping the run.",
+  "since": "v0.4.5",
+  "tags": ["llm", "routing", "cookbook", "network"],
+  "run": { "stopOnError": true, "executeTimeoutSec": 600, "processNodeLimit": 400 },
+  "seedContext": "seed-context.json",
+  "requires": {
+    "profiles": ["llm-nara-ai"],
+    "services": [
+      { "what": "OpenAI-compatible router, reachable with NARA_AI_ACCESS_TOKEN", "at": "https://router.bynara.id/v1" }
+    ]
+  },
+  "expect": {
+    "status": "finished",
+    "errorCount": 0,
+    "context": {
+      "classified": { "len": 12 },
+      "tally.total_lines": 12,
+      "tally.routed": 12,
+      "tally.counts": { "exists": true },
+      "summary": { "exists": true }
+    }
+  },
+  "notes": "~2 minutes wall clock: 12 lines, 13 LLM calls, serial cursor loop. stopOnError is ON deliberately — this is the flow whose exception edge had to survive it. A fresh context per run is what keeps `classified` at exactly 12 (see the cookbook's stale-rows note)."
+}

@@ -1,0 +1,236 @@
+{
+  "flomorphic": {
+    "kind": "workflow",
+    "version": 1,
+    "exportedAt": "2026-10-12T15:40:41Z"
+  },
+  "title": "Exception traits — LLM (phase 3)",
+  "nodes": [
+    {
+      "ref": "start",
+      "kind": "startNode",
+      "title": "Start",
+      "key": "",
+      "scope": "",
+      "position": {
+        "x": 120,
+        "y": 320
+      }
+    },
+    {
+      "ref": "a-prose-turn-no-function-selecte",
+      "kind": "llm",
+      "title": "A · prose turn → no_function_selected",
+      "key": "prose",
+      "scope": "",
+      "position": {
+        "x": 520,
+        "y": 150
+      },
+      "data": {
+        "body": {
+          "clear_history": true,
+          "messages": [
+            {
+              "content": "You are a clinic intake assistant. For THIS request only, do NOT call any function under any circumstances. Reply with one short sentence of plain prose and nothing else.",
+              "role": "system"
+            },
+            {
+              "content": "Say hello and tell me you are ready, in one sentence. Remember: no function calls.",
+              "role": "user"
+            }
+          ]
+        },
+        "functions": [
+          {
+            "description": "The line is a drug to dispense.",
+            "id": "fn-8945c143-0",
+            "name": "dispense_medication",
+            "parameters": {
+              "properties": {
+                "drug_name": {
+                  "description": "as written",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            }
+          },
+          {
+            "description": "The line is a radiology or imaging order.",
+            "id": "fn-a37fe2bd-1",
+            "name": "order_imaging",
+            "parameters": {
+              "properties": {
+                "study": {
+                  "description": "as written",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            }
+          }
+        ],
+        "settingsId": "nset_mv47msqq5zlk5tw7"
+      }
+    },
+    {
+      "ref": "a-dispense-medication",
+      "kind": "js",
+      "title": "A · dispense_medication",
+      "key": "fired_a_dispense",
+      "scope": "",
+      "position": {
+        "x": 960,
+        "y": 40
+      },
+      "data": {
+        "logic_rule": "let fired = 'dispense_medication'\nfired"
+      }
+    },
+    {
+      "ref": "a-order-imaging",
+      "kind": "js",
+      "title": "A · order_imaging",
+      "key": "fired_a_imaging",
+      "scope": "",
+      "position": {
+        "x": 960,
+        "y": 130
+      },
+      "data": {
+        "logic_rule": "let fired = 'order_imaging'\nfired"
+      }
+    },
+    {
+      "ref": "a-exception-expect-this",
+      "kind": "js",
+      "title": "A · _EXCEPTION (expect this)",
+      "key": "fired_a_exception",
+      "scope": "",
+      "position": {
+        "x": 960,
+        "y": 230
+      },
+      "data": {
+        "logic_rule": "let fired = '_exception'\nfired"
+      }
+    },
+    {
+      "ref": "b-dead-endpoint-provider-error",
+      "kind": "llm",
+      "title": "B · dead endpoint → provider_error",
+      "key": "badmodel",
+      "scope": "",
+      "position": {
+        "x": 520,
+        "y": 520
+      },
+      "data": {
+        "body": {
+          "clear_history": true,
+          "messages": [
+            {
+              "content": "Route this line: R/ Amoxicillin 500mg",
+              "role": "user"
+            }
+          ]
+        },
+        "functions": [
+          {
+            "description": "The line is a drug to dispense.",
+            "id": "fn-12bb76bc-0",
+            "name": "dispense_medication",
+            "parameters": {
+              "properties": {
+                "drug_name": {
+                  "description": "as written",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            }
+          },
+          {
+            "description": "The line is a radiology or imaging order.",
+            "id": "fn-18cf106b-1",
+            "name": "order_imaging",
+            "parameters": {
+              "properties": {
+                "study": {
+                  "description": "as written",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            }
+          }
+        ],
+        "settingsId": "nset_mv4nax1tc8hm74v3"
+      }
+    },
+    {
+      "ref": "b-dispense-medication",
+      "kind": "js",
+      "title": "B · dispense_medication",
+      "key": "fired_b_dispense",
+      "scope": "",
+      "position": {
+        "x": 960,
+        "y": 430
+      },
+      "data": {
+        "logic_rule": "let fired = 'dispense_medication'\nfired"
+      }
+    },
+    {
+      "ref": "b-exception",
+      "kind": "js",
+      "title": "B · _exception",
+      "key": "fired_b_exception",
+      "scope": "",
+      "position": {
+        "x": 960,
+        "y": 560
+      },
+      "data": {
+        "logic_rule": "let fired = '_exception'\nfired"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "start",
+      "to": "a-prose-turn-no-function-selecte"
+    },
+    {
+      "from": "start",
+      "to": "b-dead-endpoint-provider-error"
+    },
+    {
+      "from": "a-prose-turn-no-function-selecte",
+      "to": "a-dispense-medication",
+      "port": "dispense_medication"
+    },
+    {
+      "from": "a-prose-turn-no-function-selecte",
+      "to": "a-order-imaging",
+      "port": "order_imaging"
+    },
+    {
+      "from": "a-prose-turn-no-function-selecte",
+      "to": "a-exception-expect-this",
+      "port": "_exception"
+    },
+    {
+      "from": "b-dead-endpoint-provider-error",
+      "to": "b-dispense-medication",
+      "port": "dispense_medication"
+    },
+    {
+      "from": "b-dead-endpoint-provider-error",
+      "to": "b-exception",
+      "port": "_exception"
+    }
+  ]
+}

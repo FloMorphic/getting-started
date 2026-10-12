@@ -1,0 +1,12 @@
+{
+  "id": "nset_mv1d53q3941qfx1t",
+  "nodeUniqId": "ext:aaaa-bbbb-cccc-jev0",
+  "nodeType": "ai-decision",
+  "title": "Decision-Ai-SystemOne-nimble-Local",
+  "settings": {
+    "model": "nimble",
+    "provider": "systemone",
+    "timeout_seconds": 30,
+    "url": "${OLLAMA_URL:-http://host.docker.internal:11434}"
+  }
+}

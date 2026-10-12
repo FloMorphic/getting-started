@@ -1,0 +1,50 @@
+{
+  "_note": "Inputs only. `queue`, `i`, `results` and `report` are built by the flow's `Reset state & build queue` node on every run, ON PURPOSE: a Context is durable state, so a second run over the same Context would otherwise find i already at the end and skip the loop entirely. Do not move them in here.",
+  "cases": [
+    {
+      "id": "t1_billing_clear",
+      "expect": "billing",
+      "text": "I was charged twice for my September invoice — two identical $49 charges on the same card, same day. Please refund one of them."
+    },
+    {
+      "id": "t2_technical_clear",
+      "expect": "technical",
+      "text": "Since the 4.2 update the app crashes straight back to the home screen every time I open it. I have reinstalled twice and it does the same thing. iPhone 15, iOS 18."
+    },
+    {
+      "id": "t3_access_clear",
+      "expect": "account_access",
+      "text": "I cannot sign in. It keeps saying my password is wrong, and the reset email never arrives — I have checked my spam folder. I have been locked out for two days now."
+    },
+    {
+      "id": "t4_out_of_scope",
+      "expect": "other",
+      "text": "Hi there! I was wondering whether you have any openings for backend engineers at the moment. I would love to send over my CV."
+    },
+    {
+      "id": "t5_ambiguous",
+      "expect": "ambiguous",
+      "acceptable": [
+        "billing",
+        "account_access"
+      ],
+      "text": "My card expired so the payment failed, and now my subscription is suspended and I cannot get into my account at all."
+    },
+    {
+      "id": "t6_critical",
+      "expect": "technical",
+      "text": "Production is down for all 400 of our users. The dashboard returns 500s on every page and some customer records are coming back with fields blanked out. Our legal team is now involved and we need someone on the phone today."
+    },
+    {
+      "id": "t7_angry_but_routine",
+      "expect": "billing",
+      "text": "This is the THIRD time I have had to write in and I am absolutely furious. All I want is a copy of my invoice for August for my expense report. Why is this so hard?!"
+    },
+    {
+      "id": "t8_misleading_vocab",
+      "expect": "technical",
+      "text": "My account balance chart is rendering completely wrong — it shows negative values in the sidebar widget even though the figures on the statement page are correct. Looks like a display bug on your end."
+    }
+  ],
+  "reps": 3
+}

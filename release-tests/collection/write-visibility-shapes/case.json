@@ -1,0 +1,34 @@
+{
+  "flowId": "flow_relt_shapes001",
+  "title": "Write visibility by shape — sequential, parallel, and after a join",
+  "proves": "An edge orders a write against what runs after it: a node reading its immediate predecessor's key always sees it, and a node after a Wait for All sees every joined branch's key. Two PARALLEL branches are deliberately not asserted — there is no happens-before between them, which is what Wait for All exists to provide.",
+  "since": "v0.4.6",
+  "tags": [
+    "engine",
+    "write-visibility",
+    "join",
+    "fast"
+  ],
+  "repeat": 60,
+  "poll": 0.25,
+  "run": {
+    "stopOnError": false,
+    "executeTimeoutSec": 120,
+    "processNodeLimit": 400
+  },
+  "seedContext": {},
+  "requires": {
+    "profiles": [],
+    "services": []
+  },
+  "expect": {
+    "status": "finished",
+    "errorCount": 0,
+    "context": {
+      "a_saw": 24,
+      "c_saw.c1": 24,
+      "c_saw.c2": 24
+    }
+  },
+  "notes": "Companion to loop-write-visibility, mapping WHICH shapes are ordered. Measured unpatched vs patched in fractal-core, 300 runs each:\n  back-to-back (a1 -> a2)      1/300 missed the write  ->  0/300 after the fix\n  after Wait for All (c1,c2)   0/300 both arms          ->  the join was already a correct barrier\n  parallel cross-read (b1,b2)  ~7-12% missed, BOTH arms ->  unchanged, and correct\n\n`b1_saw_b2` and `b2_saw_b1` are recorded but NOT asserted on purpose. Two branches off Start have no ordering between them, so either value is legitimate; asserting on them would encode a guarantee the engine does not make, and 'fixing' it would mean synchronising every write to hide a real design constraint. If you want one branch to see another's work, join them.\n\nNeeds no model, no plugin, no network and no secret — js, rule and promissall only."
+}

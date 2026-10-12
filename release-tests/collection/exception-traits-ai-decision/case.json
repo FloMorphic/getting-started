@@ -1,0 +1,23 @@
+{
+  "flowId": "flow_mv4ne18w4fj72pbm",
+  "title": "Exception traits — AI Decision (phase 2)",
+  "proves": "The ai-decision plugin sorts its exception codes by whether the node delivered: a confidence below the designer's floor is a decision that keeps routing under stopOnError, while a provider error past its retry budget still fails the node and still loses its branch.",
+  "since": "v0.4.5",
+  "tags": ["ai-decision", "exception-traits", "local-model"],
+  "run": { "stopOnError": true, "executeTimeoutSec": 180 },
+  "seedContext": {},
+  "requires": {
+    "profiles": ["ai-decision-nimble-local", "ai-decision-dead-endpoint"],
+    "services": [
+      { "what": "Ollama serving nimble:latest", "at": "http://localhost:11434" },
+      { "what": "nothing listening (the point of branch B)", "at": "http://127.0.0.1:8771" }
+    ]
+  },
+  "expect": {
+    "status": "finished",
+    "errorCount": 1,
+    "markers": { "fired_a_exception": true, "fired_b_exception": false },
+    "codes": { "uncertain": "low_confidence", "unreachable": "provider_error" }
+  },
+  "notes": "Branch A's floor is deliberately unsatisfiable (1.0), so the question always takes the exception edge; the seeded case is genuinely ambiguous, so the low confidence is earned (0.406 when first verified). Before v0.4.5 branch A behaved like branch B — min_confidence defeated itself. With stopOnError off, both exception markers fire and the error count stays 1."
+}

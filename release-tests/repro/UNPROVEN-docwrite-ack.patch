@@ -1,0 +1,132 @@
+diff --git a/engine/process.go b/engine/process.go
+index 8629a82..90c9993 100644
+--- a/engine/process.go
++++ b/engine/process.go
+@@ -20,6 +20,16 @@ import (
+ type updateDocRequest struct {
+ 	loc   jp.Expr
+ 	value gen.Node
++	// applied is closed once this write has been written INTO docContext, not
++	// merely received off the queue. The sender waits on it, which is what makes
++	// a node's result visible to its successors before they are queued: the
++	// handoff used to complete as soon as the handler received the value, and the
++	// apply happened afterwards under the lock — so a successor could be queued
++	// and read docContext in between and miss the write. A loop guard, which runs
++	// once per arrival, read its counter as absent that way and took its `done`
++	// port on the first pass, ending the run having done nothing.
++	// nil is allowed and means fire-and-forget.
++	applied chan struct{}
+ }
+ type Process struct {
+ 	req            models.ProcessRequest
+@@ -415,6 +425,40 @@ func (p *Process) joinState(n *models.Node) joinArrival {
+ 	return arrival
+ }
+ 
++// applyDocWrite applies one queued write to docContext and then acknowledges it.
++//
++// Every return path acknowledges — applied, re-pointed to $.unknow, or failed —
++// because the sender is parked on req.applied until this returns, and a write
++// that could never be acked would hang the task that made it. The ack is the
++// whole point: see updateDocRequest.applied.
++func (p *Process) applyDocWrite(req updateDocRequest) {
++	defer func() {
++		if req.applied != nil {
++			close(req.applied)
++		}
++	}()
++	// A write AT the root merges its fields instead of replacing the document —
++	// the key-less node that contributes fields to a shared record.
++	if req.loc.String() == jp.R().String() {
++		if nval, ok := req.value.(gen.Object); ok {
++			p.l.Lock()
++			maps.Copy(p.docContext.(gen.Object), nval)
++			p.l.Unlock()
++			return
++		}
++		// A non-object result has nowhere to merge into.
++		req.loc, _ = jp.ParseString("$.unknow")
++	}
++	p.l.Lock()
++	err := req.loc.Set(p.docContext, req.value)
++	p.l.Unlock()
++	if err != nil {
++		// @TODO - log error
++		logtool.GetLogger().Error("error updating doc context", "process", p.req.PID, "error", err.Error())
++		fmt.Printf("error updating doc context: %v\n", err)
++	}
++}
++
+ // contextWriteQueHandler applies queued document writes, one at a time, until
+ // the queue is closed. It is the only writer of docContext.
+ //
+@@ -424,28 +468,7 @@ func (p *Process) joinState(n *models.Node) joinArrival {
+ // run(), which creates it.
+ func (p *Process) contextWriteQueHandler() {
+ 	for req := range p.writeQueueChan {
+-		// get p.docContext
+-		if req.loc.String() == jp.R().String() {
+-			if nval, ok := req.value.(gen.Object); ok {
+-				p.l.Lock()
+-				maps.Copy(p.docContext.(gen.Object), nval)
+-				p.l.Unlock()
+-				continue
+-			} else {
+-				//exception case
+-				req.loc, _ = jp.ParseString("$.unknow")
+-			}
+-
+-		}
+-		p.l.Lock()
+-		err := req.loc.Set(p.docContext, req.value)
+-		p.l.Unlock()
+-		if err != nil {
+-			// @TODO - log error
+-			logtool.GetLogger().Error("error updating doc context", "process", p.req.PID, "error", err.Error())
+-			fmt.Printf("error updating doc context: %v\n", err)
+-		}
+-
++		p.applyDocWrite(req)
+ 	}
+ 	logtool.GetLogger().Infof("close context write queue channel in process id %s\n", p.req.PID)
+ 	fmt.Printf("close context write queue channel in process id %s\n", p.req.PID)
+diff --git a/engine/task_accessors.go b/engine/task_accessors.go
+index dd3153b..f5c9305 100644
+--- a/engine/task_accessors.go
++++ b/engine/task_accessors.go
+@@ -16,7 +16,34 @@ func (t *Task) SetProcessResult(newData gen.Node, current jp.Expr) {
+ 	if t.Node.Key != "" {
+ 		current = current.C(t.Node.Key)
+ 	}
+-	t.Proc.writeQueueChan <- updateDocRequest{loc: current, value: newData}
++	t.commitDoc(updateDocRequest{loc: current, value: newData})
++}
++
++// commitDoc queues a document write and waits until it has been APPLIED, not
++// merely received. Without the wait, a node settled and had its successors
++// queued while its own result was still in flight, and a successor that read
++// the document in that window saw the value as absent.
++//
++// The ctx cases are the escape: a process that is finishing or cancelled closes
++// the write queue and stops its handler, and a task parked here must not outlive
++// it.
++func (t *Task) commitDoc(req updateDocRequest) {
++	req.applied = make(chan struct{})
++	// A Process built without a ctx (tests do) never cancels: a nil channel in a
++	// select simply never fires, which is exactly that meaning.
++	var cancelled <-chan struct{}
++	if t.Proc.ctx != nil {
++		cancelled = t.Proc.ctx.Done()
++	}
++	select {
++	case t.Proc.writeQueueChan <- req:
++	case <-cancelled:
++		return
++	}
++	select {
++	case <-req.applied:
++	case <-cancelled:
++	}
+ }
+ 
+ func (t *Task) GetLocation() ([]jp.Expr, error) {

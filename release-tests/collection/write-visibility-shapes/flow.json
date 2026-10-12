@@ -1,0 +1,201 @@
+{
+  "flomorphic": {
+    "kind": "workflow",
+    "version": 1
+  },
+  "title": "Write visibility by shape — sequential, parallel, and after a join",
+  "nodes": [
+    {
+      "ref": "start",
+      "kind": "startNode",
+      "title": "Start",
+      "position": {
+        "x": 60,
+        "y": 400
+      }
+    },
+    {
+      "ref": "a1",
+      "kind": "js",
+      "title": "A write",
+      "key": "a_val",
+      "scope": "$",
+      "position": {
+        "x": 320,
+        "y": 120
+      },
+      "data": {
+        "logic_rule": "let q = []\nlet n = 1\nwhile (n <= 24) { q.push(n); n = n + 1 }\nq\n"
+      }
+    },
+    {
+      "ref": "a2",
+      "kind": "js",
+      "title": "A read (back-to-back)",
+      "key": "a_saw",
+      "scope": "$",
+      "position": {
+        "x": 600,
+        "y": 120
+      },
+      "data": {
+        "logic_rule": "let v = input.a_val || []\nv.length\n"
+      }
+    },
+    {
+      "ref": "b1",
+      "kind": "js",
+      "title": "B1 write",
+      "key": "b1_val",
+      "scope": "$",
+      "position": {
+        "x": 320,
+        "y": 330
+      },
+      "data": {
+        "logic_rule": "let q = []\nlet n = 1\nwhile (n <= 24) { q.push(n); n = n + 1 }\nq\n"
+      }
+    },
+    {
+      "ref": "b2",
+      "kind": "js",
+      "title": "B2 write",
+      "key": "b2_val",
+      "scope": "$",
+      "position": {
+        "x": 320,
+        "y": 450
+      },
+      "data": {
+        "logic_rule": "let q = []\nlet n = 1\nwhile (n <= 24) { q.push(n); n = n + 1 }\nq\n"
+      }
+    },
+    {
+      "ref": "b1r",
+      "kind": "js",
+      "title": "B1 reads b2 (parallel peer)",
+      "key": "b1_saw_b2",
+      "scope": "$",
+      "position": {
+        "x": 600,
+        "y": 330
+      },
+      "data": {
+        "logic_rule": "let v = input.b2_val || []\nv.length\n"
+      }
+    },
+    {
+      "ref": "b2r",
+      "kind": "js",
+      "title": "B2 reads b1 (parallel peer)",
+      "key": "b2_saw_b1",
+      "scope": "$",
+      "position": {
+        "x": 600,
+        "y": 450
+      },
+      "data": {
+        "logic_rule": "let v = input.b1_val || []\nv.length\n"
+      }
+    },
+    {
+      "ref": "c1",
+      "kind": "js",
+      "title": "C1 write",
+      "key": "c1_val",
+      "scope": "$",
+      "position": {
+        "x": 320,
+        "y": 640
+      },
+      "data": {
+        "logic_rule": "let q = []\nlet n = 1\nwhile (n <= 24) { q.push(n); n = n + 1 }\nq\n"
+      }
+    },
+    {
+      "ref": "c2",
+      "kind": "js",
+      "title": "C2 write",
+      "key": "c2_val",
+      "scope": "$",
+      "position": {
+        "x": 320,
+        "y": 760
+      },
+      "data": {
+        "logic_rule": "let q = []\nlet n = 1\nwhile (n <= 24) { q.push(n); n = n + 1 }\nq\n"
+      }
+    },
+    {
+      "ref": "cjoin",
+      "kind": "promissall",
+      "title": "Wait for All",
+      "scope": "$",
+      "position": {
+        "x": 600,
+        "y": 700
+      },
+      "data": {}
+    },
+    {
+      "ref": "cread",
+      "kind": "js",
+      "title": "C reads both (after join)",
+      "key": "c_saw",
+      "scope": "$",
+      "position": {
+        "x": 880,
+        "y": 700
+      },
+      "data": {
+        "logic_rule": "let a = (input.c1_val || []).length\nlet b = (input.c2_val || []).length\nlet out = { c1: a, c2: b }\nout\n"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "start",
+      "to": "a1"
+    },
+    {
+      "from": "a1",
+      "to": "a2"
+    },
+    {
+      "from": "start",
+      "to": "b1"
+    },
+    {
+      "from": "start",
+      "to": "b2"
+    },
+    {
+      "from": "b1",
+      "to": "b1r"
+    },
+    {
+      "from": "b2",
+      "to": "b2r"
+    },
+    {
+      "from": "start",
+      "to": "c1"
+    },
+    {
+      "from": "start",
+      "to": "c2"
+    },
+    {
+      "from": "c1",
+      "to": "cjoin"
+    },
+    {
+      "from": "c2",
+      "to": "cjoin"
+    },
+    {
+      "from": "cjoin",
+      "to": "cread"
+    }
+  ]
+}

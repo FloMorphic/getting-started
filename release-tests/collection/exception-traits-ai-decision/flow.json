@@ -1,0 +1,249 @@
+{
+  "flomorphic": {
+    "kind": "workflow",
+    "version": 1,
+    "exportedAt": "2026-10-12T15:40:41Z"
+  },
+  "title": "Exception traits — AI Decision (phase 2)",
+  "nodes": [
+    {
+      "ref": "start",
+      "kind": "startNode",
+      "title": "Start",
+      "key": "",
+      "scope": "",
+      "position": {
+        "x": 120,
+        "y": 360
+      }
+    },
+    {
+      "ref": "seed-the-state",
+      "kind": "js",
+      "title": "Seed the state",
+      "key": "case",
+      "scope": "",
+      "position": {
+        "x": 440,
+        "y": 360
+      },
+      "data": {
+        "logic_rule": "let state = { text: 'The invoice page crashes whenever I open it, and I think I may also have been charged the wrong amount — not sure which is the real problem.' }\nstate"
+      }
+    },
+    {
+      "ref": "a-floor-1-0-low-confidence-alway",
+      "kind": "ai-decision",
+      "title": "A · floor 1.0 → low_confidence (always)",
+      "key": "uncertain",
+      "scope": "",
+      "position": {
+        "x": 820,
+        "y": 150
+      },
+      "data": {
+        "body": {
+          "state": "{{$.case.text}}"
+        },
+        "questions": [
+          {
+            "id": "category",
+            "instructions": "Which team should handle this support message?",
+            "min_confidence": 1,
+            "options": [
+              {
+                "description": "Payments, invoices, charges, refunds, pricing or what a subscription costs.",
+                "id": "opt-d1b7d3e6-0",
+                "name": "billing"
+              },
+              {
+                "description": "The product is broken or misbehaving: crashes, errors, outages, bugs, missing data.",
+                "id": "opt-8ba87cde-1",
+                "name": "technical"
+              },
+              {
+                "description": "None of the above — sales enquiries, job applications, general feedback.",
+                "id": "opt-944e5bfc-2",
+                "name": "other"
+              }
+            ],
+            "route": true,
+            "type": "choice"
+          }
+        ],
+        "settingsId": "nset_mv1d53q3941qfx1t"
+      }
+    },
+    {
+      "ref": "a-category-billing",
+      "kind": "js",
+      "title": "A · category.billing",
+      "key": "fired_a_billing",
+      "scope": "",
+      "position": {
+        "x": 1240,
+        "y": 20
+      },
+      "data": {
+        "logic_rule": "let fired = 'category.billing'\nfired"
+      }
+    },
+    {
+      "ref": "a-category-technical",
+      "kind": "js",
+      "title": "A · category.technical",
+      "key": "fired_a_technical",
+      "scope": "",
+      "position": {
+        "x": 1240,
+        "y": 110
+      },
+      "data": {
+        "logic_rule": "let fired = 'category.technical'\nfired"
+      }
+    },
+    {
+      "ref": "a-category-other",
+      "kind": "js",
+      "title": "A · category.other",
+      "key": "fired_a_other",
+      "scope": "",
+      "position": {
+        "x": 1240,
+        "y": 200
+      },
+      "data": {
+        "logic_rule": "let fired = 'category.other'\nfired"
+      }
+    },
+    {
+      "ref": "a-exception-expect-this",
+      "kind": "js",
+      "title": "A · _EXCEPTION (expect this)",
+      "key": "fired_a_exception",
+      "scope": "",
+      "position": {
+        "x": 1240,
+        "y": 290
+      },
+      "data": {
+        "logic_rule": "let fired = '_exception'\nfired"
+      }
+    },
+    {
+      "ref": "b-dead-endpoint-provider-error",
+      "kind": "ai-decision",
+      "title": "B · dead endpoint → provider_error",
+      "key": "unreachable",
+      "scope": "",
+      "position": {
+        "x": 820,
+        "y": 560
+      },
+      "data": {
+        "body": {
+          "state": "{{$.case.text}}"
+        },
+        "questions": [
+          {
+            "id": "category",
+            "instructions": "Which team should handle this support message?",
+            "min_confidence": 0,
+            "options": [
+              {
+                "description": "Payments, invoices, charges, refunds, pricing or what a subscription costs.",
+                "id": "opt-09418dbb-0",
+                "name": "billing"
+              },
+              {
+                "description": "The product is broken or misbehaving: crashes, errors, outages, bugs, missing data.",
+                "id": "opt-6d4e696b-1",
+                "name": "technical"
+              },
+              {
+                "description": "None of the above — sales enquiries, job applications, general feedback.",
+                "id": "opt-fae41205-2",
+                "name": "other"
+              }
+            ],
+            "route": true,
+            "type": "choice"
+          }
+        ],
+        "settingsId": "nset_muvvldxk9bs43o2b"
+      }
+    },
+    {
+      "ref": "b-category-billing",
+      "kind": "js",
+      "title": "B · category.billing",
+      "key": "fired_b_billing",
+      "scope": "",
+      "position": {
+        "x": 1240,
+        "y": 470
+      },
+      "data": {
+        "logic_rule": "let fired = 'category.billing'\nfired"
+      }
+    },
+    {
+      "ref": "b-exception",
+      "kind": "js",
+      "title": "B · _exception",
+      "key": "fired_b_exception",
+      "scope": "",
+      "position": {
+        "x": 1240,
+        "y": 600
+      },
+      "data": {
+        "logic_rule": "let fired = '_exception'\nfired"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "start",
+      "to": "seed-the-state"
+    },
+    {
+      "from": "seed-the-state",
+      "to": "a-floor-1-0-low-confidence-alway"
+    },
+    {
+      "from": "seed-the-state",
+      "to": "b-dead-endpoint-provider-error"
+    },
+    {
+      "from": "a-floor-1-0-low-confidence-alway",
+      "to": "a-category-billing",
+      "port": "category.billing"
+    },
+    {
+      "from": "a-floor-1-0-low-confidence-alway",
+      "to": "a-category-technical",
+      "port": "category.technical"
+    },
+    {
+      "from": "a-floor-1-0-low-confidence-alway",
+      "to": "a-category-other",
+      "port": "category.other"
+    },
+    {
+      "from": "a-floor-1-0-low-confidence-alway",
+      "to": "a-exception-expect-this",
+      "port": "_exception"
+    },
+    {
+      "from": "b-dead-endpoint-provider-error",
+      "to": "b-category-billing",
+      "port": "category.billing"
+    },
+    {
+      "from": "b-dead-endpoint-provider-error",
+      "to": "b-exception",
+      "port": "_exception"
+    }
+  ]
+}

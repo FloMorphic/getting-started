@@ -1,0 +1,523 @@
+{
+  "flomorphic": {
+    "kind": "workflow",
+    "version": 1,
+    "exportedAt": "2026-10-12T15:40:41Z"
+  },
+  "title": "Prescription intake router — LLM route decision (Nara-ai)",
+  "nodes": [
+    {
+      "ref": "start",
+      "kind": "startNode",
+      "title": "Start",
+      "key": "",
+      "scope": "",
+      "position": {
+        "x": 120,
+        "y": 314
+      }
+    },
+    {
+      "ref": "normalize-prescription-lines",
+      "kind": "js",
+      "title": "Normalize prescription lines",
+      "key": "prescription",
+      "scope": "",
+      "position": {
+        "x": 484,
+        "y": 314
+      },
+      "data": {
+        "logic_rule": "let p = input.prescription || {}\nlet raw = p.items || []\nlet items = raw.map(function (it, idx) {\n  let base = (typeof it === 'string') ? { line: it } : (it || {})\n  return { no: idx + 1, line: base.line || base.text || '', ref: base.no || '' }\n})\nlet prescription = Object.assign({}, p, { items: items })\nprescription\n"
+      }
+    },
+    {
+      "ref": "init-cursor",
+      "kind": "js",
+      "title": "Init cursor",
+      "key": "i",
+      "scope": "",
+      "position": {
+        "x": 848,
+        "y": 314
+      },
+      "data": {
+        "logic_rule": "let i = 0\ni\n"
+      }
+    },
+    {
+      "ref": "more-lines",
+      "kind": "rule",
+      "title": "More lines?",
+      "key": "",
+      "scope": "",
+      "position": {
+        "x": 1212,
+        "y": 283
+      },
+      "data": {
+        "handlers": [
+          {
+            "id": "h1",
+            "name": "next",
+            "tags": [
+              "next"
+            ],
+            "title": "Next line"
+          },
+          {
+            "id": "h2",
+            "name": "done",
+            "tags": [
+              "done"
+            ],
+            "title": "All lines routed"
+          }
+        ],
+        "logic_rule": "let items = (input.prescription && input.prescription.items) || []\nlet decision = input.i < items.length ? 'next' : 'done'\ndecision\n"
+      }
+    },
+    {
+      "ref": "lift-current-line",
+      "kind": "js",
+      "title": "Lift current line",
+      "key": "current",
+      "scope": "",
+      "position": {
+        "x": 1576,
+        "y": 478
+      },
+      "data": {
+        "logic_rule": "let items = (input.prescription && input.prescription.items) || []\nlet current = items[input.i] || { no: (input.i || 0) + 1, line: '' }\ncurrent\n"
+      }
+    },
+    {
+      "ref": "route-line-nara-ai",
+      "kind": "llm",
+      "title": "Route line (Nara-ai)",
+      "key": "decision",
+      "scope": "",
+      "position": {
+        "x": 1940,
+        "y": 304
+      },
+      "data": {
+        "body": {
+          "clear_history": true,
+          "messages": [
+            {
+              "content": "You are the intake router for an outpatient clinic in Indonesia. You receive ONE line from a prescription at a time. A line may be a medication to dispense, a radiology or imaging order, a laboratory test, or a clinic procedure or therapy. Lines may be written in Indonesian or English and may use local shorthand: USG means ultrasound or sonography, Thorax means chest, puasa means fasting, Echo 2D means echocardiography, R/ introduces a drug. Decide which single department owns the line and call exactly one function with the details the line actually states. Never invent a dose, a quantity, a body region or a preparation that is not written. The working diagnosis is background only: do not copy it into a field unless the line itself states it. If the line is not an actionable order, or you cannot tell which department owns it, call flag_unclear. Always call exactly one function and never reply in prose.",
+              "role": "system"
+            },
+            {
+              "content": "Prescription {{$.prescription.id}} — patient {{$.prescription.patient.name}}, working diagnosis: {{$.prescription.diagnosis}}.\n\nLine {{$.current.no}}: {{$.current.line}}\n\nRoute this single line now by calling exactly one function.",
+              "role": "user"
+            }
+          ]
+        },
+        "functions": [
+          {
+            "description": "The line is a drug to be dispensed to the patient: a tablet, capsule, syrup, injection, topical or inhaler with a dose or quantity.",
+            "id": "fn-0975d3d2-0",
+            "name": "dispense_medication",
+            "parameters": {
+              "properties": {
+                "dosage_form": {
+                  "description": "tablet, capsule, syrup, injection, cream, inhaler",
+                  "type": "string"
+                },
+                "dose_instruction": {
+                  "description": "how it is taken, e.g. 1 capsule three times daily",
+                  "type": "string"
+                },
+                "drug_name": {
+                  "description": "generic or brand name exactly as written",
+                  "type": "string"
+                },
+                "duration": {
+                  "description": "e.g. 7 days; empty if not stated",
+                  "type": "string"
+                },
+                "quantity": {
+                  "description": "total amount dispensed, e.g. 21",
+                  "type": "string"
+                },
+                "strength": {
+                  "description": "e.g. 500 mg; empty if not stated",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "drug_name"
+              ],
+              "type": "object"
+            },
+            "title": "Pharmacy"
+          },
+          {
+            "description": "The line is a diagnostic imaging study: X-ray, ultrasound or sonography (USG), CT, MRI, mammography, fluoroscopy or echocardiography.",
+            "id": "fn-c743be2f-1",
+            "name": "schedule_imaging",
+            "parameters": {
+              "properties": {
+                "body_region": {
+                  "description": "the region or organ imaged, e.g. lumbar spine, abdomen, chest",
+                  "type": "string"
+                },
+                "clinical_question": {
+                  "description": "what the study is ruling in or out — only if the LINE itself states it; leave empty otherwise, never copy the working diagnosis here",
+                  "type": "string"
+                },
+                "contrast": {
+                  "description": "yes, no, or unknown — only what the line states",
+                  "type": "string"
+                },
+                "modality": {
+                  "description": "x_ray, ultrasound, ct, mri, echocardiography, mammography or other",
+                  "type": "string"
+                },
+                "preparation": {
+                  "description": "patient prep the line mentions, e.g. fasting 6 hours",
+                  "type": "string"
+                },
+                "view_or_protocol": {
+                  "description": "e.g. PA view standing, upper and lower abdomen",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "modality"
+              ],
+              "type": "object"
+            },
+            "title": "Radiology / Imaging"
+          },
+          {
+            "description": "The line is a laboratory test on a specimen: blood, urine, stool, swab, culture, biopsy or pathology panel.",
+            "id": "fn-666f2f0e-2",
+            "name": "order_lab_test",
+            "parameters": {
+              "properties": {
+                "fasting_required": {
+                  "description": "yes, no or unknown — only what the line states",
+                  "type": "string"
+                },
+                "panel_items": {
+                  "description": "comma separated components when the line lists several",
+                  "type": "string"
+                },
+                "specimen": {
+                  "description": "blood, urine, stool, swab, tissue or unknown",
+                  "type": "string"
+                },
+                "test_name": {
+                  "description": "the test or panel as written",
+                  "type": "string"
+                },
+                "urgency": {
+                  "description": "routine, urgent or cito if stated",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "test_name"
+              ],
+              "type": "object"
+            },
+            "title": "Laboratory"
+          },
+          {
+            "description": "The line is something performed on the patient at the facility rather than handed over or analysed: nebulization, wound care, injection administered in clinic, physiotherapy, traction, dialysis, minor surgery.",
+            "id": "fn-39d2e622-3",
+            "name": "schedule_procedure",
+            "parameters": {
+              "properties": {
+                "agent_or_equipment": {
+                  "description": "the drug or device used during the procedure, if stated",
+                  "type": "string"
+                },
+                "location": {
+                  "description": "where it is done, if stated",
+                  "type": "string"
+                },
+                "notes": {
+                  "description": "anything else the line specifies",
+                  "type": "string"
+                },
+                "procedure_name": {
+                  "description": "the procedure or therapy as written",
+                  "type": "string"
+                },
+                "sessions": {
+                  "description": "how many sessions or how often",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "procedure_name"
+              ],
+              "type": "object"
+            },
+            "title": "Procedure / Therapy"
+          },
+          {
+            "description": "The line is not an actionable order, is too vague to route, refers to an earlier prescription, or could belong to more than one department and must be confirmed with the prescriber.",
+            "id": "fn-8282d203-4",
+            "name": "flag_unclear",
+            "parameters": {
+              "properties": {
+                "candidate_departments": {
+                  "description": "the departments it might belong to, comma separated",
+                  "type": "string"
+                },
+                "reason": {
+                  "description": "why this line cannot be routed as written",
+                  "type": "string"
+                },
+                "suggested_followup": {
+                  "description": "what to ask the prescriber or the patient",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "reason"
+              ],
+              "type": "object"
+            },
+            "title": "Needs clarification"
+          }
+        ],
+        "settingsId": "nset_mv47msqq5zlk5tw7"
+      }
+    },
+    {
+      "ref": "collect-pharmacy",
+      "kind": "js",
+      "title": "Collect → Pharmacy",
+      "key": "classified",
+      "scope": "",
+      "position": {
+        "x": 2304,
+        "y": 120
+      },
+      "data": {
+        "logic_rule": "let out = input.decision || {}\nlet calls = out.tool_calls || []\nlet raw = calls.length ? calls[0].arguments : null\nlet detail = {}\nif (typeof raw === 'string') { try { detail = JSON.parse(raw) } catch (e) { detail = { unparsed: raw } } } else if (raw) { detail = raw }\nlet item = input.current || {}\nlet kept = (input.classified || []).filter(function (r) { return r.no !== item.no })\nlet row = { no: item.no, line: item.line, category: 'medication', department: 'Pharmacy', detail: detail }\nlet classified = kept.concat([row])\nclassified\n"
+      }
+    },
+    {
+      "ref": "collect-radiology",
+      "kind": "js",
+      "title": "Collect → Radiology",
+      "key": "classified",
+      "scope": "",
+      "position": {
+        "x": 2304,
+        "y": 263
+      },
+      "data": {
+        "logic_rule": "let out = input.decision || {}\nlet calls = out.tool_calls || []\nlet raw = calls.length ? calls[0].arguments : null\nlet detail = {}\nif (typeof raw === 'string') { try { detail = JSON.parse(raw) } catch (e) { detail = { unparsed: raw } } } else if (raw) { detail = raw }\nlet item = input.current || {}\nlet kept = (input.classified || []).filter(function (r) { return r.no !== item.no })\nlet row = { no: item.no, line: item.line, category: 'imaging', department: 'Radiology / Imaging', detail: detail }\nlet classified = kept.concat([row])\nclassified\n"
+      }
+    },
+    {
+      "ref": "collect-laboratory",
+      "kind": "js",
+      "title": "Collect → Laboratory",
+      "key": "classified",
+      "scope": "",
+      "position": {
+        "x": 2304,
+        "y": 406
+      },
+      "data": {
+        "logic_rule": "let out = input.decision || {}\nlet calls = out.tool_calls || []\nlet raw = calls.length ? calls[0].arguments : null\nlet detail = {}\nif (typeof raw === 'string') { try { detail = JSON.parse(raw) } catch (e) { detail = { unparsed: raw } } } else if (raw) { detail = raw }\nlet item = input.current || {}\nlet kept = (input.classified || []).filter(function (r) { return r.no !== item.no })\nlet row = { no: item.no, line: item.line, category: 'lab', department: 'Laboratory', detail: detail }\nlet classified = kept.concat([row])\nclassified\n"
+      }
+    },
+    {
+      "ref": "collect-procedure",
+      "kind": "js",
+      "title": "Collect → Procedure",
+      "key": "classified",
+      "scope": "",
+      "position": {
+        "x": 2304,
+        "y": 549
+      },
+      "data": {
+        "logic_rule": "let out = input.decision || {}\nlet calls = out.tool_calls || []\nlet raw = calls.length ? calls[0].arguments : null\nlet detail = {}\nif (typeof raw === 'string') { try { detail = JSON.parse(raw) } catch (e) { detail = { unparsed: raw } } } else if (raw) { detail = raw }\nlet item = input.current || {}\nlet kept = (input.classified || []).filter(function (r) { return r.no !== item.no })\nlet row = { no: item.no, line: item.line, category: 'procedure', department: 'Procedure / Therapy', detail: detail }\nlet classified = kept.concat([row])\nclassified\n"
+      }
+    },
+    {
+      "ref": "collect-needs-clarification",
+      "kind": "js",
+      "title": "Collect → Needs clarification",
+      "key": "classified",
+      "scope": "",
+      "position": {
+        "x": 2304,
+        "y": 692
+      },
+      "data": {
+        "logic_rule": "let out = input.decision || {}\nlet calls = out.tool_calls || []\nlet raw = calls.length ? calls[0].arguments : null\nlet detail = {}\nif (typeof raw === 'string') { try { detail = JSON.parse(raw) } catch (e) { detail = { unparsed: raw } } } else if (raw) { detail = raw }\nlet item = input.current || {}\nlet kept = (input.classified || []).filter(function (r) { return r.no !== item.no })\nlet row = { no: item.no, line: item.line, category: 'unclear', department: 'Needs clarification', detail: detail }\nlet classified = kept.concat([row])\nclassified\n"
+      }
+    },
+    {
+      "ref": "collect-router-error",
+      "kind": "js",
+      "title": "Collect → Router error",
+      "key": "classified",
+      "scope": "",
+      "position": {
+        "x": 2304,
+        "y": 835
+      },
+      "data": {
+        "logic_rule": "let out = input.decision || {}\nlet item = input.current || {}\nlet existing = (input.classified || []).filter(function (r) { return r.no === item.no })\nlet kept = (input.classified || []).filter(function (r) { return r.no !== item.no })\nlet alreadyRouted = existing.length > 0 && existing[0].category !== 'error'\nlet row = alreadyRouted ? existing[0] : { no: item.no, line: item.line, category: 'error', department: 'Needs clarification', detail: { reason: 'the router returned an error or called no function', error: out.error || '' } }\nlet classified = kept.concat([row])\nclassified\n"
+      }
+    },
+    {
+      "ref": "next-line",
+      "kind": "js",
+      "title": "Next line",
+      "key": "i",
+      "scope": "",
+      "position": {
+        "x": 2668,
+        "y": 478
+      },
+      "data": {
+        "logic_rule": "let cur = input.current || {}\nlet i = cur.no ? cur.no : (input.i || 0) + 1\ni\n"
+      }
+    },
+    {
+      "ref": "tally-by-department",
+      "kind": "js",
+      "title": "Tally by department",
+      "key": "tally",
+      "scope": "",
+      "position": {
+        "x": 1576,
+        "y": 150
+      },
+      "data": {
+        "logic_rule": "let rows = (input.classified || []).slice().sort(function (a, b) { return a.no - b.no })\nlet counts = {}\nlet byDepartment = {}\nrows.forEach(function (r) {\n  counts[r.category] = (counts[r.category] || 0) + 1\n  byDepartment[r.department] = (byDepartment[r.department] || []).concat([r.no + '. ' + r.line])\n})\nlet total = ((input.prescription && input.prescription.items) || []).length\nlet needsReview = rows.filter(function (r) { return r.category === 'unclear' || r.category === 'error' })\nlet tally = { total_lines: total, routed: rows.length, unrouted: total - rows.length, counts: counts, byDepartment: byDepartment, needs_review: needsReview.length }\ntally\n"
+      }
+    },
+    {
+      "ref": "intake-summary-nara-ai",
+      "kind": "llm",
+      "title": "Intake summary (Nara-ai)",
+      "key": "summary",
+      "scope": "",
+      "position": {
+        "x": 1940,
+        "y": 138
+      },
+      "data": {
+        "body": {
+          "clear_history": true,
+          "messages": [
+            {
+              "content": "You write the intake note a clinic front desk reads after a prescription has been routed. Use only the routed data you are given. Do not re-classify anything and do not add clinical advice.",
+              "role": "system"
+            },
+            {
+              "content": "Prescription {{$.prescription.id}} for {{$.prescription.patient.name}} ({{$.prescription.patient.age}}, MRN {{$.prescription.patient.mrn}}) has been routed line by line.\n\nRouted lines:\n{{$.classified}}\n\nTally:\n{{$.tally}}\n\nWrite the intake note: one short opening sentence saying what this prescription includes overall, then a section per department listing its lines, then a final section naming every line that still needs clarification and what to ask. Keep it under 200 words.",
+              "role": "user"
+            }
+          ]
+        },
+        "settingsId": "nset_mv47msqq5zlk5tw7"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "start",
+      "to": "normalize-prescription-lines"
+    },
+    {
+      "from": "normalize-prescription-lines",
+      "to": "init-cursor"
+    },
+    {
+      "from": "init-cursor",
+      "to": "more-lines"
+    },
+    {
+      "from": "more-lines",
+      "to": "lift-current-line",
+      "port": "next"
+    },
+    {
+      "from": "more-lines",
+      "to": "tally-by-department",
+      "port": "done"
+    },
+    {
+      "from": "lift-current-line",
+      "to": "route-line-nara-ai"
+    },
+    {
+      "from": "route-line-nara-ai",
+      "to": "collect-pharmacy",
+      "port": "dispense_medication"
+    },
+    {
+      "from": "route-line-nara-ai",
+      "to": "collect-radiology",
+      "port": "schedule_imaging"
+    },
+    {
+      "from": "route-line-nara-ai",
+      "to": "collect-laboratory",
+      "port": "order_lab_test"
+    },
+    {
+      "from": "route-line-nara-ai",
+      "to": "collect-procedure",
+      "port": "schedule_procedure"
+    },
+    {
+      "from": "route-line-nara-ai",
+      "to": "collect-needs-clarification",
+      "port": "flag_unclear"
+    },
+    {
+      "from": "route-line-nara-ai",
+      "to": "collect-router-error",
+      "port": "_exception"
+    },
+    {
+      "from": "collect-pharmacy",
+      "to": "next-line"
+    },
+    {
+      "from": "collect-radiology",
+      "to": "next-line"
+    },
+    {
+      "from": "collect-laboratory",
+      "to": "next-line"
+    },
+    {
+      "from": "collect-procedure",
+      "to": "next-line"
+    },
+    {
+      "from": "collect-needs-clarification",
+      "to": "next-line"
+    },
+    {
+      "from": "collect-router-error",
+      "to": "next-line"
+    },
+    {
+      "from": "tally-by-department",
+      "to": "intake-summary-nara-ai"
+    },
+    {
+      "from": "next-line",
+      "to": "more-lines"
+    }
+  ]
+}

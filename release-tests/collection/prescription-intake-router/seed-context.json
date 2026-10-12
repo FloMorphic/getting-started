@@ -1,0 +1,85 @@
+{
+  "_note": "Seed Context for prescription-intake-router. The flow reads $.prescription and writes everything else (i, current, decision, classified, tally, summary) itself. `classified: []` is here on purpose - see the README note on reusing a Context.",
+  "prescription": {
+    "clinic": "Nara General Clinic — Outpatient",
+    "diagnosis": "Dyspepsia + suspected lumbar radiculopathy, r/o community-acquired pneumonia",
+    "id": "RX-2026-00871",
+    "issuedAt": "2026-10-09",
+    "items": [
+      {
+        "line": "Amoxicillin 500 mg capsule — 1 capsule PO three times daily for 7 days (#21)",
+        "no": 1,
+        "ref": 1
+      },
+      {
+        "line": "USG Abdomen atas + bawah, puasa 6 jam sebelum pemeriksaan",
+        "no": 2,
+        "ref": 2
+      },
+      {
+        "line": "Paracetamol 500 mg tablet — 1 tab PO every 6 hours as needed for fever (#20)",
+        "no": 3,
+        "ref": 3
+      },
+      {
+        "line": "Thorax X-Ray PA view, standing",
+        "no": 4,
+        "ref": 4
+      },
+      {
+        "line": "Complete blood count with differential + CRP quantitative",
+        "no": 5,
+        "ref": 5
+      },
+      {
+        "line": "Nebulizer salbutamol 2.5 mg, twice daily, administered at the clinic treatment room",
+        "no": 6,
+        "ref": 6
+      },
+      {
+        "line": "MRI Lumbal spine with gadolinium contrast — rule out disc herniation L4-L5",
+        "no": 7,
+        "ref": 7
+      },
+      {
+        "line": "Omeprazole 20 mg — 1 tablet 30 minutes before breakfast (#14)",
+        "no": 8,
+        "ref": 8
+      },
+      {
+        "line": "Physiotherapy, lumbar traction, 3 sessions over 2 weeks",
+        "no": 9,
+        "ref": 9
+      },
+      {
+        "line": "Urinalysis dipstick + sediment microscopy",
+        "no": 10,
+        "ref": 10
+      },
+      {
+        "line": "Echo 2D",
+        "no": 11,
+        "ref": 11
+      },
+      {
+        "line": "Lanjutkan obat rutin dari dokter sebelumnya",
+        "no": 12,
+        "ref": 12
+      }
+    ],
+    "patient": {
+      "age": 54,
+      "allergies": [
+        "sulfa"
+      ],
+      "mrn": "MRN-44918",
+      "name": "Bagus Prasetyo",
+      "sex": "M"
+    },
+    "prescriber": {
+      "name": "dr. Rahmi Oktaviani, Sp.PD",
+      "sip": "SIP/2231/DU/2024"
+    }
+  },
+  "classified": []
+}

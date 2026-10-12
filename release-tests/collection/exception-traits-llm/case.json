@@ -1,0 +1,23 @@
+{
+  "flowId": "flow_mv4nb2j4drcunuha",
+  "title": "Exception traits — LLM (phase 3)",
+  "proves": "Same split in the llm plugin: a model answering in prose instead of calling a function is the node delivering (it routes through _exception), while a provider error past its retry budget marks the node red, counts in the run's errors and stops a run that asked to stop at errors.",
+  "since": "v0.4.5",
+  "tags": ["llm", "exception-traits", "network"],
+  "run": { "stopOnError": true, "executeTimeoutSec": 180 },
+  "seedContext": {},
+  "requires": {
+    "profiles": ["llm-nara-ai", "llm-dead-endpoint"],
+    "services": [
+      { "what": "OpenAI-compatible router, reachable with NARA_AI_ACCESS_TOKEN", "at": "https://router.bynara.id/v1" },
+      { "what": "nothing listening (the point of branch B)", "at": "http://127.0.0.1:8771/v1" }
+    ]
+  },
+  "expect": {
+    "status": "finished",
+    "errorCount": 1,
+    "markers": { "fired_a_exception": true, "fired_b_exception": false },
+    "codes": { "prose": "no_function_selected", "badmodel": "provider_error" }
+  },
+  "notes": "Branch B is what phase 3 restored: under the shipped option A a provider error concluded Done, so it could not mark the node red or stop the run. Branch B needs its own profile rather than an inline settings override — the api projection takes the resolved profile and drops the override."
+}

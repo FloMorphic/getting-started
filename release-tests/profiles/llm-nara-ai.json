@@ -1,0 +1,13 @@
+{
+  "id": "nset_mv47msqq5zlk5tw7",
+  "nodeUniqId": "ext:aaaa-bbbb-cccc-llm0",
+  "nodeType": "llm",
+  "title": "Nara-ai",
+  "settings": {
+    "access_token": "${NARA_AI_ACCESS_TOKEN}",
+    "model": "laguna-s-2.1",
+    "provider": "openai-compatible",
+    "temperature": 0.3,
+    "url": "https://router.bynara.id/v1"
+  }
+}

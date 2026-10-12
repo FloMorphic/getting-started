@@ -1,0 +1,46 @@
+{
+  "flowId": "flow_mv1fvdmnb2b64ijc",
+  "title": "AI Decision bench — nimble (local Ollama)",
+  "proves": "A model that declares what it may answer is a model you can measure: the same AI Decision question runs 24 times (8 cases x 3 reps) against a local model, and the report shows whether its confidence tracks difficulty and whether the port it routed to matches the category it named.",
+  "since": "v0.4.5",
+  "tags": [
+    "ai-decision",
+    "bench",
+    "local-model",
+    "slow"
+  ],
+  "run": {
+    "stopOnError": false,
+    "executeTimeoutSec": 1200,
+    "processNodeLimit": 600
+  },
+  "seedContext": "seed-context.json",
+  "requires": {
+    "profiles": [
+      "ai-decision-nimble-local"
+    ],
+    "services": [
+      {
+        "what": "Ollama serving nimble:latest",
+        "at": "http://localhost:11434"
+      }
+    ]
+  },
+  "expect": {
+    "status": "finished",
+    "errorCount": 0,
+    "context": {
+      "report.rows": 24,
+      "report.distinct_cases": 8,
+      "report.exceptions": 0,
+      "report.category_accuracy_all_reps": {
+        "gte": 0.8
+      },
+      "report.stability": {
+        "len": 8
+      }
+    }
+  },
+  "notes": "24 serial decisions against a local model. The MODEL is not the problem: accuracy is ~1.0 on essentially every run, including the failing ones.\n\nITS FLAKE WAS AN ENGINE DEFECT, SINCE FOUND AND FIXED. Measured on v0.4.5 this case was wrong in ~30% of runs: either one row missing (23/24, random case) or an early exit reporting an empty report as a successful run. The cause was write visibility in fractal-core — a node's result was handed to an unbuffered channel and applied AFTER the send returned, so a successor could read the document without the write in it. A 24-iteration loop compounds a ~0.33% per-edge miss into ~30% per run. See collection/loop-write-visibility, which reproduces the same defect in 30ms, and fractal-core's writeDoc.\n\nCONTEXT REUSE IS NOT INVOLVED — that was tested and ruled out: fresh-Context and shared-Context arms both scored 7/10, and ten consecutive runs over one Context all looped fully. `Reset state & build queue` does its job; do NOT move queue/i/results into the seed to 'fix' anything (tried, and it is a regression — it makes the flow depend on a freshly seeded Context and guarantees a skip on re-run).\n\nCONFIRMED FIXED at this case's own operating point: 12/12 clean on the shipped image (flomorphic:latest with fractal f59b0c6), 2026-10-13. At the old ~30% rate twelve clean runs would be a 1.4% coincidence, so the `flaky` tag is dropped. repeat is 3 because each run is ~60s; three runs catch a 30% regression about two times in three, so read a single failure as a prompt to re-run rather than a verdict.",
+  "repeat": 3
+}

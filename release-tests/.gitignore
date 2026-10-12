@@ -1,0 +1,3 @@
+# Real secret values for the profiles. Never committed — profiles/*.json carry
+# ${VAR} references and secrets.env.example carries the empty shape.
+secrets.env

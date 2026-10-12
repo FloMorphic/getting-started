@@ -1,0 +1,13 @@
+{
+  "id": "nset_muvvldxk9bs43o2b",
+  "nodeUniqId": "ext:aaaa-bbbb-cccc-jev0",
+  "nodeType": "ai-decision",
+  "title": "Local stand-in (retry test)",
+  "settings": {
+    "access_token": "",
+    "max_retries": 3,
+    "model": "fake-local",
+    "timeout_seconds": 30,
+    "url": "http://127.0.0.1:8771"
+  }
+}

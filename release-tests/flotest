@@ -1,0 +1,748 @@
+#!/usr/bin/env python3
+"""flotest — import a collection of flows into a FloMorphic instance and run them.
+
+A release test is a flow plus what it should produce. The collection under
+`collection/` holds both; this drives them over the instance's MCP endpoint.
+
+    ./flotest check                 is the instance up, and does it have the nodes?
+    ./flotest list                  what is in the collection
+    ./flotest profiles              create the Node Settings profiles the flows need
+    ./flotest import                import every flow, keeping its id
+    ./flotest run [slug ...]        seed a context, run, assert, report
+    ./flotest all                   profiles + import + run, then a summary table
+    ./flotest add <flow_id> <slug>  export a flow off the instance INTO the collection
+    ./flotest pull [slug ...]       re-export collected flows from the instance
+
+Default endpoint is http://localhost:8026/mcp (the API port a FloMorphic stack
+publishes); override with --endpoint or FLOTEST_MCP.
+
+Every flow is imported under the id recorded in its case.json, so importing is
+idempotent: the same collection lands on the same ids on any instance, and a
+re-import updates in place rather than piling up copies.
+"""
+
+import argparse
+import json
+import os
+import pathlib
+import re
+import sys
+import time
+import urllib.error
+import urllib.request
+
+ROOT = pathlib.Path(__file__).resolve().parent
+COLLECTION = ROOT / "collection"
+PROFILES = ROOT / "profiles"
+SECRETS = ROOT / "secrets.env"
+DEFAULT_ENDPOINT = os.environ.get("FLOTEST_MCP", "http://localhost:8026/mcp")
+
+TTY = sys.stdout.isatty()
+G, R, Y, B, DIM, OFF = "\033[32m", "\033[31m", "\033[33m", "\033[34m", "\033[2m", "\033[0m"
+if not sys.stdout.isatty() or os.environ.get("NO_COLOR"):
+    G = R = Y = B = DIM = OFF = ""
+
+OK, BAD, SKIP = f"{G}PASS{OFF}", f"{R}FAIL{OFF}", f"{Y}SKIP{OFF}"
+
+
+# ── MCP ───────────────────────────────────────────────────────────────────────
+class McpError(RuntimeError):
+    pass
+
+
+class Mcp:
+    """Minimal Streamable-HTTP MCP client.
+
+    The server is stateless (it issues no Mcp-Session-Id), so every call is one
+    POST and there is no session to keep alive. Responses come back as plain
+    JSON or as a one-event SSE frame depending on the transport's mood, so both
+    are unwrapped here.
+    """
+
+    def __init__(self, endpoint, token=None, timeout=120):
+        self.endpoint, self.token, self.timeout = endpoint, token, timeout
+        self._id = 0
+
+    def _rpc(self, method, params=None):
+        self._id += 1
+        body = {"jsonrpc": "2.0", "id": self._id, "method": method}
+        if params is not None:
+            body["params"] = params
+        headers = {"Content-Type": "application/json",
+                   "Accept": "application/json, text/event-stream"}
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        req = urllib.request.Request(self.endpoint, data=json.dumps(body).encode(),
+                                     headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as f:
+                raw = f.read().decode()
+        except urllib.error.HTTPError as e:
+            raise McpError(f"HTTP {e.code} from {self.endpoint}: {e.read().decode()[:300]}")
+        except urllib.error.URLError as e:
+            raise McpError(f"cannot reach {self.endpoint}: {e.reason}")
+        # An SSE frame carries the JSON on its `data:` lines.
+        if raw.lstrip().startswith("event:") or raw.lstrip().startswith("data:"):
+            raw = "".join(l[5:].strip() for l in raw.splitlines() if l.startswith("data:"))
+        env = json.loads(raw)
+        if "error" in env:
+            raise McpError(f"{method}: {env['error'].get('message', env['error'])}")
+        return env.get("result", {})
+
+    def handshake(self):
+        return self._rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
+                                        "clientInfo": {"name": "flotest", "version": "1"}})
+
+    def tools(self):
+        return [t["name"] for t in self._rpc("tools/list").get("tools", [])]
+
+    def list_all(self, name, **args):
+        """Page a list tool to the end. The list tools take page/per_page (max
+        100) and answer {list, total}, so one call never sees a big table."""
+        page, out = 1, []
+        while True:
+            res = self.call(name, page=page, per_page=100, **args)
+            rows = res.get("list") or []
+            out.extend(rows)
+            total = int(res.get("total") or 0)
+            if not rows or len(out) >= total or page > 50:
+                return out
+            page += 1
+
+    def call(self, name, **args):
+        res = self._rpc("tools/call", {"name": name, "arguments": args})
+        text = "".join(c.get("text", "") for c in res.get("content", []))
+        if res.get("isError"):
+            raise McpError(f"{name}: {text[:400]}")
+        if not text:
+            return {}
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            return {"_text": text}
+
+
+# ── collection ────────────────────────────────────────────────────────────────
+class Case:
+    def __init__(self, path):
+        self.dir = path
+        self.slug = path.name
+        self.case = json.loads((path / "case.json").read_text())
+        self.flow = json.loads((path / "flow.json").read_text())
+
+    @property
+    def flow_id(self):
+        return self.case["flowId"]
+
+    @property
+    def tags(self):
+        return self.case.get("tags", [])
+
+    @property
+    def repeat(self):
+        """How many times a passing run has to pass. A flake-hunting case needs
+        repetition to mean anything: a defect that shows in 5% of runs clears a
+        single run 95% of the time."""
+        return max(1, int(self.case.get("repeat", 1)))
+
+    @property
+    def poll(self):
+        """Seconds between status polls. A case that finishes in milliseconds
+        should not be billed the default two seconds."""
+        return self.case.get("poll")
+
+    @property
+    def manual(self):
+        return bool((self.case.get("requires") or {}).get("manualSetup"))
+
+    def seed(self):
+        s = self.case.get("seedContext", {})
+        if isinstance(s, str):
+            return json.loads((self.dir / s).read_text())
+        return s or {}
+
+    def profiles(self):
+        return (self.case.get("requires") or {}).get("profiles", [])
+
+
+def load_cases(slugs=None):
+    out = []
+    for d in sorted(COLLECTION.iterdir()):
+        if not (d / "case.json").exists():
+            continue
+        if slugs and d.name not in slugs:
+            continue
+        out.append(Case(d))
+    if slugs:
+        missing = set(slugs) - {c.slug for c in out}
+        if missing:
+            die(f"no such case(s) in the collection: {', '.join(sorted(missing))}")
+    return out
+
+
+def load_secrets():
+    """secrets.env — KEY=value lines. Holds the real secret values, and any
+    per-install override a profile parameterised (an endpoint that differs
+    between a containerised instance and an API running on the host). A real
+    environment variable of the same name wins over the file."""
+    env = {}
+    if SECRETS.exists():
+        for line in SECRETS.read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                env[k.strip()] = v.strip()
+    for k, v in os.environ.items():
+        if k in env or k.endswith(("_ACCESS_TOKEN", "_URL", "_TOKEN")):
+            env[k] = v
+    return env
+
+
+# ${VAR} — must be supplied. ${VAR:-default} — supplied, or this.
+VAR_RE = re.compile(r"\$\{([A-Z0-9_]+)(?::-([^}]*))?\}")
+
+
+def fill_secrets(value, env, missing):
+    """Substitute ${VAR} / ${VAR:-default} anywhere in a profile's settings.
+
+    A var with no default and no value is collected into `missing` rather than
+    silently becoming an empty string — an endpoint or token that quietly went
+    blank is a confusing run, not a clear one.
+    """
+    if isinstance(value, str):
+        def sub(m):
+            name, default = m.group(1), m.group(2)
+            if env.get(name):
+                return env[name]
+            if default is not None:
+                return default
+            missing.add(name)
+            return ""
+        return VAR_RE.sub(sub, value)
+    if isinstance(value, dict):
+        return {k: fill_secrets(v, env, missing) for k, v in value.items()}
+    if isinstance(value, list):
+        return [fill_secrets(v, env, missing) for v in value]
+    return value
+
+
+# ── assertions ────────────────────────────────────────────────────────────────
+def dig(obj, path):
+    """Dotted path lookup. Returns (found, value)."""
+    cur = obj
+    for part in path.split("."):
+        if isinstance(cur, dict) and part in cur:
+            cur = cur[part]
+        elif isinstance(cur, list) and part.isdigit() and int(part) < len(cur):
+            cur = cur[int(part)]
+        else:
+            return False, None
+    return True, cur
+
+
+def match(found, actual, m):
+    """The matcher vocabulary. A bare value means equality."""
+    if isinstance(m, dict):
+        for op, want in m.items():
+            if op == "exists":
+                if found != want:
+                    return False, f"exists={found}, wanted {want}"
+            elif op == "eq":
+                if actual != want:
+                    return False, f"{actual!r} != {want!r}"
+            elif op == "len":
+                n = len(actual) if hasattr(actual, "__len__") else None
+                ok, why = match(n is not None, n, want if isinstance(want, dict) else {"eq": want})
+                if not ok:
+                    return False, f"len {why}"
+            elif op == "gte":
+                if not isinstance(actual, (int, float)) or actual < want:
+                    return False, f"{actual!r} < {want}"
+            elif op == "lte":
+                if not isinstance(actual, (int, float)) or actual > want:
+                    return False, f"{actual!r} > {want}"
+            elif op == "contains":
+                if want not in (actual or ""):
+                    return False, f"{str(actual)[:40]!r} does not contain {want!r}"
+            else:
+                return False, f"unknown matcher {op!r}"
+        return True, ""
+    if not found:
+        return False, f"absent, wanted {m!r}"
+    if actual != m:
+        return False, f"{actual!r} != {m!r}"
+    return True, ""
+
+
+def assert_case(case, status, ctx, errors):
+    """Compare a finished run against case.expect. Returns a list of failures."""
+    exp = case.case.get("expect", {})
+    fails = []
+
+    if "status" in exp and status != exp["status"]:
+        fails.append(f"status: {status!r} != {exp['status']!r}")
+
+    if "errorCount" in exp:
+        n = int((errors or {}).get("count", 0) or 0)
+        ok, why = match(True, n, exp["errorCount"] if isinstance(exp["errorCount"], dict)
+                        else {"eq": exp["errorCount"]})
+        if not ok:
+            fails.append(f"errorCount: {why}")
+
+    for name, want in (exp.get("markers") or {}).items():
+        present = name in (ctx or {})
+        if want is False and present:
+            fails.append(f"marker {name}: fired ({ctx[name]!r}), should not have")
+        elif want is True and not present:
+            fails.append(f"marker {name}: did not fire")
+        elif isinstance(want, str) and ctx.get(name) != want:
+            fails.append(f"marker {name}: {ctx.get(name)!r} != {want!r}")
+
+    for key, want in (exp.get("codes") or {}).items():
+        payload = (ctx or {}).get(key)
+        got = payload.get("code") if isinstance(payload, dict) else None
+        if got != want:
+            fails.append(f"code at {key}: {got!r} != {want!r}")
+
+    for path, want in (exp.get("context") or {}).items():
+        found, actual = dig(ctx or {}, path)
+        ok, why = match(found, actual, want)
+        if not ok:
+            fails.append(f"context.{path}: {why}")
+
+    return fails
+
+
+# ── commands ──────────────────────────────────────────────────────────────────
+def die(msg, code=2):
+    print(f"{R}error{OFF} {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def cmd_check(mcp, args):
+    info = mcp.handshake()
+    si = info.get("serverInfo", {})
+    print(f"{G}reachable{OFF}  {mcp.endpoint}")
+    print(f"  server      {si.get('name')} {si.get('version')}  protocol {info.get('protocolVersion')}")
+    names = mcp.tools()
+    print(f"  mcp tools   {len(names)}")
+    need = ["flo_import_workflow", "flo_export_workflow", "flo_upsert_node_setting",
+            "flo_upsert_context", "flo_start_process", "flo_list_processes", "flo_get_context"]
+    short = [n for n in need if n not in names]
+    if short:
+        die("this instance is missing tools flotest needs: " + ", ".join(short))
+    exts = mcp.list_all("flo_list_extensions")
+    by_type = {e.get("type"): e for e in exts}
+    by_plugin = {e.get("pluginId"): e for e in exts if e.get("pluginId")}
+    print(f"  extensions  {len(exts)}")
+
+    cases = load_cases()
+    print(f"\ncollection    {len(cases)} case(s), {len(list(PROFILES.glob('*.json')))} profile(s)")
+
+    # The node kinds the collection's flows are built from. A builtin node that
+    # this install has not registered is why an imported flow compiles and then
+    # does nothing, so name it here rather than at run time.
+    builtin = {"startNode", "js", "rule", "goto", "http", "set", "note"}
+    kinds = {}
+    for c in cases:
+        for n in c.flow["nodes"]:
+            if n["kind"] not in builtin:
+                kinds.setdefault(n["kind"], set()).add(c.slug)
+    print("node kinds     the flows need, and whether this instance has them:")
+    gaps = 0
+    for kind in sorted(kinds):
+        e = by_type.get(kind)
+        if e:
+            print(f"  {G}ok{OFF}   {kind:14} {DIM}{e.get('id')} {e.get('name')}"
+                  f"{' plugin ' + e['pluginId'] if e.get('pluginId') else ''}{OFF}")
+        else:
+            gaps += 1
+            print(f"  {R}gap{OFF}  {kind:14} {R}no extension of this type{OFF} "
+                  f"{DIM}— needed by {', '.join(sorted(kinds[kind]))}{OFF}")
+
+    # A profile binds to a node by nodeUniqId ("ext:<pluginId>"). If that plugin
+    # is not on the install, the profile lands but resolves to nothing.
+    for p in sorted(PROFILES.glob("*.json")):
+        rec = json.loads(p.read_text())
+        uniq = rec.get("nodeUniqId", "")
+        pid = uniq.split("ext:", 1)[-1] if uniq.startswith("ext:") else uniq
+        if pid not in by_plugin and pid not in {e.get("id") for e in exts}:
+            gaps += 1
+            print(f"  {R}gap{OFF}  profile {p.stem}: nodeUniqId {uniq} matches no extension here")
+    if gaps:
+        print(f"{Y}note{OFF}          {gaps} gap(s) above — imports will still land, "
+              f"but those nodes cannot run")
+    env = load_secrets()
+    needed = set()
+    for c in cases:
+        for p in c.profiles():
+            needed.add(p)
+    blank = []
+    for name in sorted(needed):
+        f = PROFILES / f"{name}.json"
+        if not f.exists():
+            blank.append(f"{name} (no profiles/{name}.json)")
+            continue
+        miss = set()
+        fill_secrets(json.loads(f.read_text()).get("settings", {}), env, miss)
+        if miss:
+            blank.append(f"{name} (unset: {', '.join(sorted(miss))})")
+    if blank:
+        print(f"{Y}secrets{OFF}       {len(blank)} profile(s) incomplete — fill secrets.env:")
+        for b in blank:
+            print(f"              {b}")
+    else:
+        print(f"{G}secrets{OFF}       every profile the collection needs can be filled")
+
+
+def cmd_list(mcp, args):
+    cases = load_cases()
+    for c in cases:
+        tags = ",".join(c.tags)
+        flags = []
+        if c.manual:
+            flags.append("manual-setup")
+        print(f"{B}{c.slug}{OFF}")
+        print(f"  {c.case['title']}")
+        print(f"  {DIM}id {c.flow_id} · since {c.case.get('since','?')} · {len(c.flow['nodes'])} nodes"
+              f" · tags {tags}{' · ' + ','.join(flags) if flags else ''}{OFF}")
+        print(f"  proves: {c.case.get('proves','')}")
+        print()
+    print(f"{len(cases)} case(s) in {COLLECTION}")
+
+
+def cmd_profiles(mcp, args):
+    env = load_secrets()
+    want = {p for c in load_cases(args.slugs or None) for p in c.profiles()}
+    if not want:
+        print("no profiles required")
+        return 0
+    bad = 0
+    for name in sorted(want):
+        f = PROFILES / f"{name}.json"
+        if not f.exists():
+            print(f"{BAD} {name}: profiles/{name}.json missing")
+            bad += 1
+            continue
+        rec = json.loads(f.read_text())
+        missing = set()
+        settings = fill_secrets(rec.get("settings", {}), env, missing)
+        if missing:
+            print(f"{BAD} {name}: unset secret(s) {', '.join(sorted(missing))} — add them to secrets.env")
+            bad += 1
+            continue
+        out = mcp.call("flo_upsert_node_setting", id=rec["id"], nodeUniqId=rec["nodeUniqId"],
+                       nodeType=rec.get("nodeType", ""), title=rec.get("title", ""),
+                       settings=settings)
+        print(f"{OK} {name} -> {out.get('id')} {DIM}({rec.get('title')}){OFF}")
+    return 1 if bad else 0
+
+
+def cmd_import(mcp, args):
+    bad = 0
+    for c in load_cases(args.slugs or None):
+        res = mcp.call("flo_import_workflow", workflow=c.flow, id=c.flow_id,
+                       title=c.case["title"])
+        flow = res.get("flow") or {}
+        miss = res.get("missingActions") or []
+        cerr = res.get("compileError")
+        probs = res.get("problems") or []
+        # Only a missing action is fatal: it means no plugin here provides a node
+        # the flow is built from. A compileError is a report, not a gate — a
+        # plugin's account resolves live, so an install whose runtime is not up
+        # yet (no INFLOW_INFRA_API) reports one for every flow and still runs
+        # them once Infra is reachable. The problems are the designer's own
+        # lint, and these flows carry known-and-intended fan-in warnings.
+        if miss:
+            bad += 1
+        print(f"{BAD if miss else OK} {c.slug} -> {flow.get('id', '?')}")
+        if miss:
+            print(f"     {R}missing actions{OFF}: {', '.join(miss)} "
+                  f"— the instance has no plugin providing these")
+        if cerr:
+            print(f"     {Y}compileError{OFF}: {cerr} {DIM}(resolves live; check it ran){OFF}")
+        for p in probs[:3]:
+            msg = p.get("message") if isinstance(p, dict) else p
+            at = f" at {p['at']}" if isinstance(p, dict) and p.get("at") else ""
+            print(f"     {DIM}lint{at}: {str(msg)[:140]}{OFF}")
+    return 1 if bad else 0
+
+
+def run_one(mcp, c, args):
+    """Seed a fresh context, launch, poll, assert. Returns (verdict, detail)."""
+    title = f"flotest {c.slug} @ {time.strftime('%Y-%m-%d %H:%M:%S')}"
+    ctx = mcp.call("flo_upsert_context", title=title, context=c.seed())
+    ctx_id = ctx.get("id") or ctx.get("data", {}).get("id")
+    if not ctx_id:
+        return "FAIL", [f"could not create a context: {ctx}"]
+
+    run = dict(c.case.get("run") or {})
+    started = mcp.call("flo_start_process", flowId=c.flow_id, contextId=ctx_id,
+                       **{k: v for k, v in run.items()})
+    proc = started.get("process") or started
+    pid, index = proc.get("pid"), proc.get("indexId")
+    if started.get("error"):
+        return "FAIL", [f"launch error: {started['error']}", f"ctx {ctx_id}"]
+    if not getattr(args, "_quiet", False):
+        print(f"     {DIM}run #{index} pid={pid} ctx={ctx_id} settings={run}{OFF}")
+
+    deadline = time.time() + (run.get("executeTimeoutSec", 180) + 60)
+    status, rec = None, {}
+    while time.time() < deadline:
+        time.sleep(c.poll or args.poll)
+        rows = mcp.call("flo_list_processes", pid=pid, per_page=5).get("list") or []
+        rec = rows[0] if rows else {}
+        status = rec.get("status")
+        if status not in ("running", "pending", "scheduled", None):
+            break
+    else:
+        return "FAIL", [f"still {status!r} after the timeout", f"ctx {ctx_id}"]
+
+    doc = mcp.call("flo_get_context", id=ctx_id)
+    body = doc.get("context")
+    if isinstance(body, str):
+        body = json.loads(body or "{}")
+    body = body or {}
+    errors = rec.get("errors") or {}
+    if not errors:  # older rows kept the ledger on the context header
+        hdr = doc.get("header")
+        if isinstance(hdr, str):
+            hdr = json.loads(hdr or "{}")
+        errors = (hdr or {}).get("_errors") or {}
+
+    fired = sorted(k for k in body if str(k).startswith("fired_"))
+    if not getattr(args, "_quiet", False):
+        print(f"     {DIM}status={status} {rec.get('durationMs')}ms "
+              f"errors={errors.get('count', 0)} markers={len(fired)}{OFF}")
+        for it in (errors.get("items") or [])[:6]:
+            print(f"     {DIM}· node={it.get('node')} code={it.get('code')} "
+                  f"kind={it.get('kind')} {str(it.get('msg'))[:70]}{OFF}")
+
+    fails = assert_case(c, status, body, errors)
+    if args.verbose:
+        print(f"     {DIM}context keys: {', '.join(sorted(body)[:20])}{OFF}")
+    detail = fails or [f"ctx {ctx_id}"]
+    return ("FAIL" if fails else "PASS"), detail
+
+
+def run_repeated(mcp, c, args):
+    """Run a case c.repeat times; every run must pass.
+
+    Reports how many were clean, because "47/50" is the useful number when a
+    case is hunting an intermittent defect — a bare FAIL hides whether it is
+    always broken or occasionally so.
+    """
+    n = c.repeat
+    if n == 1:
+        return run_one(mcp, c, args)
+    args._quiet = True
+    fails, first = 0, None
+    t0 = time.time()
+    try:
+        for i in range(n):
+            verdict, detail = run_one(mcp, c, args)
+            if verdict == "FAIL":
+                fails += 1
+                if first is None:
+                    first = detail
+            # Progress only on a terminal: \r on a captured log leaves a smear.
+            if TTY and ((i + 1) % max(1, n // 10) == 0 or i + 1 == n):
+                print(f"\r     {DIM}{i+1}/{n} runs, {i+1-fails} clean{OFF}   ", end="", flush=True)
+    finally:
+        args._quiet = False
+    print(("\r" if TTY else "") + f"     {DIM}{n} runs in {time.time()-t0:.0f}s, "
+          f"{n-fails} clean{OFF}" + (" " * 12 if TTY else ""))
+    if fails:
+        detail = [f"{fails} of {n} runs failed"] + (first or [])
+        return "FAIL", detail
+    return "PASS", [f"{n}/{n} clean"]
+
+
+def cmd_run(mcp, args):
+    cases = load_cases(args.slugs or None)
+    results = []
+    for c in cases:
+        why = None
+        if c.manual and not args.include_manual:
+            why = "needs manual setup (--include-manual to run it)"
+        elif "slow" in c.tags and args.skip_slow:
+            why = "tagged slow (--skip-slow)"
+        if why:
+            print(f"{SKIP} {c.slug} {DIM}— {why}{OFF}")
+            results.append((c, "SKIP", [why]))
+            continue
+        print(f"{B}>>{OFF} {c.slug} {DIM}— {c.case['title']}{OFF}")
+        if c.manual:
+            print(f"     {Y}manual setup{OFF}: {(c.case['requires'] or {})['manualSetup']}")
+        try:
+            verdict, detail = run_repeated(mcp, c, args)
+        except McpError as e:
+            verdict, detail = "FAIL", [str(e)]
+        mark = {"PASS": OK, "FAIL": BAD}[verdict]
+        print(f"{mark} {c.slug}")
+        for d in detail if verdict == "FAIL" else []:
+            print(f"     {R}·{OFF} {d}")
+        results.append((c, verdict, detail))
+        print()
+
+    print(f"{B}── summary ──{OFF}")
+    width = max((len(c.slug) for c, _, _ in results), default=10)
+    for c, verdict, detail in results:
+        mark = {"PASS": OK, "FAIL": BAD, "SKIP": SKIP}[verdict]
+        note = "" if verdict == "PASS" else f"  {DIM}{detail[0] if detail else ''}{OFF}"
+        print(f"  {mark}  {c.slug.ljust(width)}{note}")
+    n_fail = sum(1 for _, v, _ in results if v == "FAIL")
+    n_pass = sum(1 for _, v, _ in results if v == "PASS")
+    n_skip = sum(1 for _, v, _ in results if v == "SKIP")
+    print(f"\n  {n_pass} passed, {n_fail} failed, {n_skip} skipped")
+    return 1 if n_fail else 0
+
+
+def cmd_all(mcp, args):
+    print(f"{B}── profiles ──{OFF}")
+    rc = cmd_profiles(mcp, args)
+    print(f"\n{B}── import ──{OFF}")
+    rc |= cmd_import(mcp, args)
+    if rc:
+        die("setup did not complete cleanly — fix the above before running", rc)
+    print(f"\n{B}── run ──{OFF}")
+    return cmd_run(mcp, args)
+
+
+def cmd_add(mcp, args):
+    """Export a flow off the instance and write it into the collection."""
+    slug = args.slug
+    d = COLLECTION / slug
+    doc = mcp.call("flo_export_workflow", id=args.flow_id)
+    if "nodes" not in doc:
+        die(f"{args.flow_id} did not export a workflow document: {str(doc)[:200]}")
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "flow.json").write_text(json.dumps(doc, indent=2, ensure_ascii=False) + "\n")
+
+    sids = sorted({(n.get("data") or {}).get("settingsId")
+                   for n in doc["nodes"] if (n.get("data") or {}).get("settingsId")})
+    known = {json.loads(p.read_text())["id"]: p.stem for p in PROFILES.glob("*.json")}
+    prof_names, unknown = [], []
+    for s in sids:
+        (prof_names if s in known else unknown).append(known.get(s, s))
+
+    case_path = d / "case.json"
+    if case_path.exists() and not args.force:
+        print(f"{OK} refreshed collection/{slug}/flow.json {DIM}(case.json left alone){OFF}")
+    else:
+        case = {
+            "flowId": args.flow_id,
+            "title": doc.get("title", slug),
+            "proves": "TODO — what does a passing run of this prove?",
+            "since": args.since or "TODO",
+            "tags": [],
+            "run": {"stopOnError": True, "executeTimeoutSec": 300},
+            "seedContext": {},
+            "requires": {"profiles": prof_names},
+            "expect": {"status": "finished", "errorCount": 0},
+            "notes": "",
+        }
+        case_path.write_text(json.dumps(case, indent=2, ensure_ascii=False) + "\n")
+        print(f"{OK} wrote collection/{slug}/{{flow.json,case.json}}")
+        print(f"     {Y}next{OFF}: fill in `proves` and `expect` in {case_path.relative_to(ROOT)}")
+    if prof_names:
+        print(f"     profiles it needs: {', '.join(prof_names)}")
+    for s in unknown:
+        print(f"     {Y}unknown profile{OFF} {s} — run: ./flotest grab-profile {s} <name>")
+    return 0
+
+
+def cmd_grab_profile(mcp, args):
+    """Copy a Node Settings profile off the instance into profiles/, secrets split out."""
+    p = mcp.call("flo_get_node_setting", id=args.setting_id)
+    if "id" not in p:
+        die(f"{args.setting_id} not found on the instance")
+    secret_keys = {"access_token", "api_key", "apikey", "token", "password", "secret"}
+    settings, secrets = dict(p.get("settings") or {}), {}
+    for k in list(settings):
+        if k.lower() in secret_keys and str(settings[k]).strip():
+            var = f"{args.name.upper().replace('-', '_')}_{k.upper()}"
+            secrets[var] = settings[k]
+            settings[k] = "${" + var + "}"
+    rec = {"id": p["id"], "nodeUniqId": p["nodeUniqId"], "nodeType": p.get("nodeType", ""),
+           "title": p.get("title", ""), "settings": settings}
+    (PROFILES / f"{args.name}.json").write_text(json.dumps(rec, indent=2, ensure_ascii=False) + "\n")
+    print(f"{OK} wrote profiles/{args.name}.json {DIM}({p.get('title')}){OFF}")
+    if secrets:
+        with SECRETS.open("a") as f:
+            for k, v in secrets.items():
+                f.write(f"{k}={v}\n")
+        os.chmod(SECRETS, 0o600)
+        print(f"     appended {len(secrets)} secret(s) to secrets.env {DIM}(gitignored){OFF}: "
+              f"{', '.join(secrets)}")
+    return 0
+
+
+def cmd_pull(mcp, args):
+    """Re-export collected flows from the instance, keeping their case.json."""
+    for c in load_cases(args.slugs or None):
+        doc = mcp.call("flo_export_workflow", id=c.flow_id)
+        if "nodes" not in doc:
+            print(f"{BAD} {c.slug}: {c.flow_id} not on this instance")
+            continue
+        (c.dir / "flow.json").write_text(json.dumps(doc, indent=2, ensure_ascii=False) + "\n")
+        print(f"{OK} {c.slug} {DIM}({len(doc['nodes'])} nodes){OFF}")
+    return 0
+
+
+# ── entry ─────────────────────────────────────────────────────────────────────
+def main():
+    ap = argparse.ArgumentParser(prog="flotest", description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--endpoint", default=DEFAULT_ENDPOINT,
+                    help=f"MCP endpoint (default {DEFAULT_ENDPOINT})")
+    ap.add_argument("--token", default=os.environ.get("FLOTEST_TOKEN"),
+                    help="bearer token, if the instance runs with AUTH_ENABLED=true")
+    ap.add_argument("--poll", type=float, default=2.0, help="seconds between status polls")
+    ap.add_argument("-v", "--verbose", action="store_true")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    def with_slugs(p):
+        p.add_argument("slugs", nargs="*", help="case slugs; default is all of them")
+        return p
+
+    sub.add_parser("check", help="probe the instance and the collection's readiness")
+    sub.add_parser("list", help="show what is in the collection")
+    with_slugs(sub.add_parser("profiles", help="upsert the Node Settings profiles the flows need"))
+    with_slugs(sub.add_parser("import", help="import the flows, each keeping its id"))
+    r = with_slugs(sub.add_parser("run", help="run the flows and assert their expectations"))
+    a = with_slugs(sub.add_parser("all", help="profiles + import + run"))
+    for p in (r, a):
+        p.add_argument("--include-manual", action="store_true",
+                       help="also run cases that need manual setup first")
+        p.add_argument("--skip-slow", action="store_true", help="skip cases tagged slow")
+    with_slugs(sub.add_parser("pull", help="re-export collected flows from the instance"))
+
+    add = sub.add_parser("add", help="export a flow off the instance into the collection")
+    add.add_argument("flow_id")
+    add.add_argument("slug")
+    add.add_argument("--since", help="the release this case was added for, e.g. v0.4.6")
+    add.add_argument("--force", action="store_true", help="overwrite an existing case.json")
+
+    gp = sub.add_parser("grab-profile", help="copy a Node Settings profile into profiles/")
+    gp.add_argument("setting_id")
+    gp.add_argument("name")
+
+    args = ap.parse_args()
+    if not args.cmd == "run":
+        for f in ("include_manual", "skip_slow"):
+            setattr(args, f, getattr(args, f, False))
+    mcp = Mcp(args.endpoint, args.token)
+    fn = {"check": cmd_check, "list": cmd_list, "profiles": cmd_profiles, "import": cmd_import,
+          "run": cmd_run, "all": cmd_all, "add": cmd_add, "pull": cmd_pull,
+          "grab-profile": cmd_grab_profile}[args.cmd]
+    try:
+        return fn(mcp, args) or 0
+    except McpError as e:
+        die(str(e))
+    except KeyboardInterrupt:
+        return 130
+
+
+if __name__ == "__main__":
+    sys.exit(main())
