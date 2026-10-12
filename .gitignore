@@ -10,3 +10,4 @@ __*
 # Local runtime state (SQLite db, vectors, human tasks)
 flomorphic/data/
 platform/
+release-tests/

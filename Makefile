@@ -101,7 +101,8 @@ BUILD_ARGS := \
 	build run stop \
 	docker-amd64 docker-arm64 docker \
 	docker-push-amd64 docker-push-arm64 docker-push push-latest release \
-	tag inspect clean changelog changelog-lock
+	tag inspect clean changelog changelog-lock \
+	release-test release-test-check
 
 help: ## Show this help
 	@printf 'FloMorphic image targets — %s\n\n' "$(IMAGE_NAME)"
@@ -229,3 +230,23 @@ inspect: check-version ## Show what is published for this version
 clean: ## Drop the local per-arch and :local tags
 	-docker rmi $(LOCAL_IMAGE) 2>/dev/null
 	-docker rmi $(IMAGE_NAME):$(VERSION)-amd64 $(IMAGE_NAME):$(VERSION)-arm64 2>/dev/null
+
+# ── release tests ─────────────────────────────────────────────────────────────
+# release-tests/ holds a collection of flows that must still work, each with the
+# profiles, seed data and expected results a plain export does not carry. Point
+# these at the instance under test — a fresh container started from the image
+# this Makefile just published.
+#
+#   make release-test-check                      # is it up, does it have the nodes
+#   make release-test                            # profiles + import + run
+#   make release-test FLOTEST_ARGS=--include-manual
+#
+# MCP_ENDPOINT defaults to the API port a FloMorphic stack publishes.
+MCP_ENDPOINT ?= http://localhost:8026/mcp
+FLOTEST_ARGS ?=
+
+release-test-check: ## Probe the instance under test and the collection's readiness
+	./release-tests/flotest --endpoint $(MCP_ENDPOINT) check
+
+release-test: ## Import and run the release-test flows against MCP_ENDPOINT
+	./release-tests/flotest --endpoint $(MCP_ENDPOINT) all $(FLOTEST_ARGS)

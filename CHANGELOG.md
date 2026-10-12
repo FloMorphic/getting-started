@@ -16,7 +16,269 @@ component from the last recorded offset to its current `main`.
 ## [Unreleased]
 
 _Run `make changelog VERSION=<next>` to draft this section from the commits landed
-across all repos since v0.4.4._
+across all repos since v0.4.5._
+
+## [v0.4.5] — 2026-10-12
+
+One subject, approached from four sides: **an exception has to be able to reach
+the branch drawn for it.**
+
+A plugin node that raises an exception and a plugin node that failed were the
+same thing to the engine, and that made the `_exception` port a decoration. The
+run's `stop_on_error` prunes every outgoing edge of a node that did not deliver —
+*after* the routing has already selected the exception edge — so a node reported
+its exception and the flow stopped dead at it. Both plugins now sort their
+exception codes by **whether the node delivered**. A refusal, a confidence below
+the floor the designer set, and a model answering with prose instead of calling a
+function are the node *delivering*: they end with `Done`, carry the reason in the
+payload, and route. A provider error past its retry budget, a missing answer, an
+answer naming an option the question never declared, and a call to a function
+nobody bound are the node *failing*: they still mark it red, still count in the
+run's errors, and still stop a run that asked to stop at errors.
+
+**And the exception that fired most often was not one.** A vLLM-backed
+OpenAI-compatible endpoint opens a streamed tool call the way OpenAI does and then
+sends one more opening chunk with the arguments still empty; langchaingo v0.1.14
+accumulates deltas by heuristic rather than by the delta's `index`, files that
+chunk as a second, nameless call, and welds every later fragment onto it. The node
+was handed a named call with no arguments beside an anonymous call holding the
+whole argument object — so a perfectly correct single-function answer left through
+`_exception` as `unbound_function`. The **llm** node and the **mcp** node both
+rejoin the split halves now, and the repair is provably the identity on a
+well-formed stream.
+
+The canvas side is the other half of the same subject: the drawer now says which
+of a node's exception codes will end a run and which are decisions, a row with no
+name no longer gets an output port it can never fire, and a branch that went no
+further because its plugin was never up says so instead of reading as "stopped".
+
+Beside all of that, **`@inflowenger/node-plugin-sdk` reached parity with the Go
+SDK at 0.2.2**: the middleware pipeline, the `jobstop` registry and the cancelable
+job context that v0.4.4 introduced in Go are now the same shape in TypeScript, with
+the two advanced patterns they exist for — work that outlives its flow, and a job
+that carries the external service's own id — written down beside them.
+
+And the cookbook gained **two recipes that are really one argument**: a model that
+declares what it may answer is a model you can measure and route on. One runs the
+same **AI Decision** 24 times against a local model to see whether its confidence
+tracks difficulty; the other makes an `llm` node's **five bound functions the five
+departments of a clinic**, so the function the model calls is the edge the flow
+takes — and the line it cannot route becomes a question for the prescriber rather
+than a guess.
+
+### Added
+
+- **`@inflowenger/node-plugin-sdk` 0.2.2 — middleware, `jobstop`, and a job
+  context that ends with its flow.** The three pieces a plugin needs to opt into
+  being stoppable, mirrored from `go-plugin-sdk` so a plugin reads the same in
+  either language. **Middleware** (`Action.middleware`, `use(...)`, `p.use`) runs
+  per request **before the job is accepted** — before the SDK replies the jobId to
+  the runtime — which is what makes per-job registration race-free: nothing can
+  happen to a job before what was set up under its jobId is in place, and a throw
+  rejects the request instead of returning a jobId. The **`jobstop.Registry`** is
+  built from those public pieces only (`stops.middleware` on the actions that want
+  it, `stops.onSignal` on the signal port), and it is **opt-in per action** for the
+  same reason it is in Go: a job the plugin accepted deliberately outlives its
+  flow, since a later run of that node may build on its progress, so only work
+  that must not outlive the process — a paid model call nobody will read, a stream
+  to close, a lock to release — takes it. Stops are matched **by jobId and nothing
+  else**, which the module states plainly: the runtime publishes process signals on
+  one subject per plugin, so every replica sees every signal, including those of
+  jobs it never accepted. The **job context** carries `ctx.signal` for
+  `fetch`/`AbortController`, `ctx.canceled` to check before a `done()` the runtime
+  is no longer listening for, and `ctx.onDone(...)` for cleanup when the job ends
+  either way. Shipped with a test suite for all three (`jobstop`, `middleware`,
+  `context`) and a GitHub Actions CI that type-checks, builds and tests on Node 20
+  and 22. _(node-plugin-sdk)_
+- **Two advanced patterns written down in the node SDK: detached work, and one
+  name for one job.** [`docs/detached-work.md`](https://github.com/FloMorphic/node-plugin-sdk/blob/main/docs/detached-work.md)
+  is the case where **outliving the flow is the feature** — a six-hour graph build,
+  a nightly scan, a render — and the plugin returns immediately with the work's
+  *state* while a later run of the same node picks the story up and routes to a
+  different branch. Nothing in the runtime knows about any of it: there is no async
+  node and no poll node, only a plugin that decides its own temporal shape.
+  [`docs/external-job-identity.md`](https://github.com/FloMorphic/node-plugin-sdk/blob/main/docs/external-job-identity.md)
+  is its companion for the middleman plugin, which otherwise holds **two names for
+  one piece of work** — the runtime's jobId and the service's own `queryId` — and a
+  map between them that every stop, poll and log has to go through. The SDK's
+  skill, cookbook and `jobs-and-commands.md` were extended to match. _(node-plugin-sdk)_
+- **A cookbook recipe that measures whether you can trust a decision:
+  [`ai-decision-bench`](https://github.com/FloMorphic/flow-cookbook/tree/main/ai-decision-bench).**
+  The same support-triage decision run **24 times** — 8 labelled cases × 3
+  repetitions — against a **local Ollama serving `nimble`** over System One, so the
+  whole bench runs on your own machine with no API spend at 2–3 s per decision.
+  Fourteen nodes, one of which is the decision; the rest are a bench: a queue, the
+  canonical four-part loop (guard, lift, body, advance, back edge to the guard),
+  five **port-marker** nodes that turn "which edge fired" into scorable data, and a
+  scorer that reports accuracy, per-case stability across repetitions, the
+  confidence band each case landed in, and routing mismatches. What the shipped
+  sample run shows is the argument for a decision model in one table:
+  category accuracy **1.0** over the 21 scorable rows, and **confidence that
+  tracked difficulty** — the seven single-answer cases at 0.87–0.99, the genuinely
+  ambiguous one at **0.42–0.50 on every repetition**. The adversarial pair held
+  (a furious tone did not inflate urgency; billing vocabulary did not pull a
+  display bug out of `technical`). It also reports its own flaw honestly: 1 row in
+  24 recorded the *previous* pass's fired port, because a marker's write and the
+  next node's read of the shared Context raced inside a tight loop — the recipe's
+  advice is to read `$.decision.answers.<q>.tag`, written by the same node in the
+  same commit as the answer, and to keep the markers for what they make visible.
+  _(flow-cookbook)_
+- **A second cookbook recipe where the model's function call *is* the routing
+  decision:
+  [`prescription-intake-router`](https://github.com/FloMorphic/flow-cookbook/tree/main/prescription-intake-router).**
+  One outpatient prescription, **twelve mixed lines in two languages and clinic
+  shorthand**, five departments — and **nothing downstream parsing a classifier's
+  output**. The `llm` node has five bound functions, one per department, each of
+  which is a port on the canvas, so `dispense_medication` / `schedule_imaging` /
+  `order_lab_test` / `schedule_procedure` / `flag_unclear` *is* the edge the flow
+  takes. Because a function has parameters, the same call also **extracts** the
+  line into the receiving department's intake form — classify and extract are one
+  call, because the schema of the destination is the schema of the answer. The
+  design decisions are the lesson: **one `required` field per function** and it is
+  the identity of the thing, since a required `strength` is a standing invitation
+  to invent one; the **descriptions carry the taxonomy**, which is what sends a
+  *salbutamol nebulizer* to Procedure rather than Pharmacy with the drug demoted to
+  `agent_or_equipment`; **`flag_unclear` is a first-class destination with its own
+  schema**, so "continue the routine medication from the previous doctor" comes back
+  as a translated reason and a question for the prescriber instead of a guess; and
+  **`clear_history: true`** is what makes a per-line router possible at all, since
+  an `llm` node's seeded messages otherwise resolve once and persist, and by line 12
+  the model would be reading its own eleven previous routings. `_exception` is wired
+  as the sixth department, so a router failure is a row rather than a gap. Run #762
+  routed all twelve lines with nothing dropped or double-counted (`USG` →
+  ultrasound, `puasa 6 jam` → fasting 6 hours, `Echo 2D` → a cardiac 2-D
+  echocardiogram, `contrast: "unknown"` rather than invented). It is also shipped
+  **exactly as it ran**, three stale rows included: an earlier, longer prescription
+  left `classified` rows 13–15 behind, the tally reported `routed: 15, unrouted:
+  -3`, and the summary node faithfully wrote three phantom clarifications into the
+  human-facing note — because "a long-lived Context is durable state and durable
+  state needs an explicit reset" is worth one real scar in the cookbook. The
+  write-up of how it was built — one prompt in Claude Code over `flomorphic-mcp` —
+  ships beside it as [`blog-draft.md`](https://github.com/FloMorphic/flow-cookbook/blob/main/prescription-intake-router/blog-draft.md).
+  _(flow-cookbook)_
+
+### Changed
+
+- **An exception is now two different things, and both plugins say which.**
+  `ai-decision`'s five codes split three to two: `provider_error`, `no_answer` and
+  `unbound_option` are the decider failing to deliver, while **`refused`** (the
+  Decisions API's own facility for declining one question while answering the rest)
+  and **`low_confidence`** (the floor set in the drawer doing exactly what it was
+  set to do) are the node delivering a decision. `llm`'s three split one to two:
+  **`no_function_selected`** is an ordinary turn — the model answered, just with
+  prose instead of a tool call — while `provider_error` and `unbound_function` are
+  defects. The whole of that choice is one pure function, `nodeDelivered`, kept
+  separate from `exceptionRoutes`, which answers the different question of whether
+  the node has an `_exception` port at all. An **unrecognised code reports a
+  failure**, so a future exception case over-reports rather than passing a defect
+  off as a decision. _(builtin-plugins)_
+- **The AI Decision and LLM drawers say which exceptions stop a run.** Listing all
+  of a node's exception codes alike left a designer using **Stop on error** unable
+  to tell, from the node that will do it, which cases end their run — and on AI
+  Decision that mattered most for `min_confidence`, where stopping would cut the
+  very branch the floor was drawn for. Both help blocks now name the two groups
+  separately. _(morph-wapp)_
+- **A row with no name no longer gets an output port.** An unnamed function row or
+  decision option was still drawn as a port, and it could never fire: the name *is*
+  the route tag, so the port carried no tags and an edge wired there was dead on the
+  canvas it was drawn on. Worse, it made three views of one node disagree — the
+  compiler already drops these rows and both plugins decide whether they have an
+  `_exception` port from what the compiler sent, so only the editor counted them: a
+  node whose single function row was unnamed showed an exception port the plugin did
+  not believe it had. An edge already wired to one of these keeps working exactly as
+  well as it ever did, which is to say it was already dead. _(morph-wapp)_
+- **"Plugin not running" is no longer reported as "Branch stopped".** The engine
+  now cuts a plugin node's outgoing edges with its own `plugin.never.started`
+  category rather than borrowing `stop.on.error`'s, and the canvas folds the reason
+  into its run state and badges it separately — because the reader's next move is
+  different. A stop-on-error cut is the run's setting acting on a node that did not
+  deliver, and the flow author acts on it; a plugin that was never up is nobody's
+  flow bug, happens whatever `stop_on_error` says, and is fixed by starting the
+  plugin. Before this, the only configuration that fanned out through every port
+  gave no reason at all for a branch going no further. Needs
+  `@inflowenger/flow-trace` 0.2.4. _(morph-wapp)_
+- Long help text at the head of the settings drawer is clamped behind a new
+  `ClampText` component instead of pushing the fields it explains off screen.
+  _(morph-wapp)_
+
+### Fixed
+
+- **An exception could never reach its own `_exception` branch under
+  `stop_on_error`.** Both plugins paired `CmdNextFilter([_exception])` with
+  `DoneWithErrorData`, and that error payload is the core's verdict that the node
+  did not deliver — which `fractal` answers by pruning every outgoing edge of the
+  node, the exception one included, after the routing has already selected it. So
+  the branch an author drew for precisely this case could not fire. Verified on a
+  live run carrying `settings.stop_on_error: true`. A **delivered** exception now
+  ends with `Done` and carries its reason in the committed payload as `error`
+  (written last, so it outranks a caller key of the same name), because routing out
+  of `_exception` is that node delivering its answer. _(builtin-plugins)_
+  **Known trade-off, deliberately taken:** `stop_on_error` no longer stops a run at
+  a *delivered* exception — a refusal, a below-floor confidence, a prose answer where
+  a tool call was offered. In `fractal` the error record and the branch cut are the
+  same flag (`Task.didNotDeliver` drives both), so a plugin cannot report the error
+  without also triggering the cut. Honouring both at once means teaching the engine
+  that this tag is a **declared error route** and sparing it in `cutIfStopOnError`;
+  that is the alternative to this design, not a follow-up to it. The three
+  undelivered codes per plugin stop a run exactly as before.
+- **A correct single-function answer from a vLLM-backed endpoint left through
+  `_exception` as `unbound_function`.** `langchaingo` v0.1.14's `updateToolCalls`
+  merges a streamed delta into the previous call only when it carries an empty
+  `type` **and** non-empty `arguments`, and files anything else as a new call — its
+  `ToolCall` type has no `Index` field to key on. vLLM sends one extra opening chunk
+  with arguments still empty, which satisfies neither half of that test, so it
+  became a second nameless call that every later fragment accumulated onto.
+  `coalesceStreamedToolCalls` treats a nameless call as a fragment and appends its
+  arguments to the last named one. Measured against a live endpoint: of 38 deltas in
+  one turn, 1 carried `type`, 1 was that empty-argument chunk, and 36 were
+  fragments. _(builtin-plugins)_
+- **The same split, fixed in the `mcp` node, where it failed more quietly.**
+  `mcpnode` streams through the same library and reads tool calls off the first
+  choice, so the named half arrived with no arguments — the MCP server rejected it
+  on its schema — and the unnamed half was refused as an unbound tool. Both answers
+  went back to the model as tool content, so one correct answer cost a turn twice
+  over and the loop could run out to `maxTurns` and report "reached max tool turns
+  without a final answer" with nothing saying the model's arguments had been thrown
+  away. Applied before `FirstJSONValue`, which repairs the other half of the same
+  missing-index bug. Parallel tool calls are covered, since an agent loop calling
+  several tools in one turn is the normal case here. `mcp/llm` is a copy of
+  `llm/llmnode` with exported names, so the function is verified byte-identical in
+  both, and both carry the test asserting langchaingo still mis-splits — they expire
+  together. _(builtin-plugins)_
+
+### Maintenance
+
+- **The tool-call repair is pinned as the identity on well-formed output.** It is
+  gated on a call having no function name, and a real call always names the function
+  it invokes, because the name is what selects the tool — so the anthropic and
+  googleai paths need no attention, and fixing one endpoint does not reshape the
+  others. That was an argument; two tests now make it a fact: an OpenAI-shaped
+  stream must come out byte-identical, and a plain-text turn must not acquire a tool
+  call from nowhere. _(builtin-plugins)_
+- The `ai-decision` exception surface had no test coverage at all, because
+  `sdkv1.Job` has unexported fields and no test constructor; `nodeDelivered` being a
+  pure function is what made it testable — `exception_test.go` there now covers all
+  five codes. _(builtin-plugins)_
+- `exception_test.go` is restored in `llm/llmnode` with its payload, port, trait and
+  code-spelling tests — those code strings are what flows route on, so a rename is a
+  branch that silently stops matching. `mcp` needs none of this surface: it has no
+  `CmdNextFilter`, no `_exception` and no `DoneWithErrorData`, because tool routing
+  there never surfaces as workflow edges. _(builtin-plugins)_
+- `inflow-wiki`'s baseline offset is recorded in this release's lock — v0.4.4
+  announced the repo as a tracked component but its lock predated the change, so the
+  generator had no offset to diff from. From v0.4.6 it diffs like every other
+  component. Nothing new landed in the book in this window. _(getting-started)_
+
+### Baked from
+
+| Component           | Ref    | Commit    |
+| ------------------- | ------ | --------- |
+| `morph-api`         | `main` | `4adb0c4` |
+| `morph-wapp`        | `main` | `6d274f4` |
+| `builtin-plugins`   | `main` | `0aa9f51` |
+| `inflow-plugin-sdk` | `main` | `4a641c8` |
+| `node-plugin-sdk`   | `main` | `265c2f6` |
+| `plugin-catalog`    | `main` | `19744bd` |
 
 ## [v0.4.4] — 2026-10-10
 
@@ -1822,7 +2084,8 @@ across the API, the canvas and both plugin SDKs.
 | `inflow-plugin-sdk` | `main` | `96d24b9` |
 | `node-plugin-sdk`   | `main` | `f50c101` |
 
-[Unreleased]: https://github.com/FloMorphic/getting-started/compare/v0.4.4...HEAD
+[Unreleased]: https://github.com/FloMorphic/getting-started/compare/v0.4.5...HEAD
+[v0.4.5]: https://github.com/FloMorphic/getting-started/compare/v0.4.4...v0.4.5
 [v0.4.4]: https://github.com/FloMorphic/getting-started/compare/v0.4.3...v0.4.4
 [v0.4.3]: https://github.com/FloMorphic/getting-started/compare/v0.4.2...v0.4.3
 [v0.4.2]: https://github.com/FloMorphic/getting-started/compare/v0.4.1...v0.4.2
