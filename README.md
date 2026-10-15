@@ -9,6 +9,10 @@ FloMorphic — the first product built end-to-end on [Inflowenger](https://inflo
 
 `Inflowenger` · `inflow-fusion` · `FloMorphic API` · `FloMorphic Web App` · `Builtin plugin nodes`
 
+![A flow on the FloMorphic canvas — an AI Decision node routing a support ticket across typed branches](docs/images/canvas-ai-decision.png)
+
+<sub>The FloMorphic canvas: capabilities are nodes, edges are the decisions the model is allowed to make.</sub>
+
 </div>
 
 ```bash
@@ -107,6 +111,18 @@ thing*. This repository is the entry point:
 > (plugin scaffolding, resets, an end-to-end smoke check) is still being
 > assembled; until it lands, the guide plus each component's own README are the
 > source of truth.
+
+---
+
+## A look at the canvas
+
+Every FloMorphic workflow is a durable graph you build and run on one canvas —
+nodes are capabilities, edges are the decisions the model is allowed to make.
+
+| Human-in-the-loop | Typed triage routing |
+| --- | --- |
+| [![A Claude agent node that parks the flow and asks a human before continuing](docs/images/canvas-human-in-the-loop.png)](docs/images/canvas-human-in-the-loop.png) | [![An AI Decision node routing a support ticket into typed branches](docs/images/canvas-triage-routing.png)](docs/images/canvas-triage-routing.png) |
+| A model turn that pauses on `ask` and resumes when a person answers. | One decision node fanning a ticket out to typed outbound ports. |
 
 ---
 
