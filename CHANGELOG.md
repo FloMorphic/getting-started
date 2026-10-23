@@ -16,7 +16,183 @@ component from the last recorded offset to its current `main`.
 ## [Unreleased]
 
 _Run `make changelog VERSION=<next>` to draft this section from the commits landed
-across all repos since v0.4.5._
+across all repos since v0.4.6._
+
+## [v0.4.6] — 2026-10-23
+
+One subject, three distances from the flow: **where the data a flow needs
+actually lives.**
+
+**Furthest out: the product's own records.** FloMorphic has kept everything in
+one SQLite file, which is the right default for a single node and the wrong one
+for several API replicas or a database an ops team wants to back up and replicate
+themselves. So there is now a second backend — **Postgres** — that is a full
+implementation of the same repository interfaces, with hand-written SQL rather
+than a second sqlc engine, and a `schema.sql` that mirrors the SQLite one table
+for table. It is chosen from the **admin panel without a restart**: the live store
+every controller holds is a facade that resolves its backend per call, a switch
+probes and opens the candidate before it repoints, and the selection is saved to a
+`0600` file that outranks the environment on the next boot. No rows are copied — the
+instance moves to whatever the target database already holds, schema created and
+palette seeded as on any first run. Two things deliberately **stay in SQLite** on a
+Postgres deployment: vector indexes always (sqlite-vec serves both backends, so no
+pgvector requirement and a store built before the switch is still searchable
+after), and whatever `DB_LOCAL_TABLES` names — the node settings profiles and the
+Connect gateway tokens are a deployment's keys rather than its records, and
+`config` keeps those two local while everything else goes to Postgres.
+
+**Nearest in: the data a flow is handed at launch.** Every non-trivial flow grew
+the same appendage — a `js` node wired after the start node whose only job is to
+`return {…}` a fixed shape for the rest of the graph to read. A flow now
+**declares that input as a form instead**, under `preferences.entry`: a JSON
+Schema (or a plain object of seed values), one `target` path the answers are
+written to, a `prefill` mode, and `required`. The same declaration is a form any
+launcher renders — it is the plugin form-builder document, so the dialog the
+plugin pages already use draws it — a contract an agent can read over MCP, and a
+validated seed the backend writes itself before the first node runs. The preamble
+teaches the AI designer to emit it, and is blunt about the one trap: an entry is
+**input that may not arrive** — a trigger, a schedule or `required: false` can
+launch with nothing — so a flow that cannot proceed without a field still checks
+for it, it does not read `{{$._entry.x}}` as a guarantee.
+
+**And in the middle: finding one flow among many.** Flows carry **tags** now —
+normalized to a canonical label (trimmed, lower-cased, dashed, de-duplicated,
+capped at 32 of 64 chars each), written through their own route so relabelling
+never resends a 35 KB graph, filtered as a membership test on the list, and
+carried through import and export. As with the entry form, `nil` means "this save
+says nothing about tags, keep them" while an empty list clears them — the
+distinction that stops an MCP patch or an older client silently stripping a flow's
+labels.
+
+Beside those, the node settings view was **redesigned** into grouped buckets, the
+form-builder was bumped to fix the refresh button's alignment beside a multi-select,
+and the plugin catalog gained **four entries**, two of them a new kind: a **Claude
+Agent** and a **Codex Agent** node, each running a real coding agent in a working
+tree on the plugin's own host with a "needs a human" port, plus a **Microsoft SQL
+Server** plugin as the Go sibling of Postgres.
+
+### Added
+
+- **A Postgres backend, switchable from the admin panel without a restart.** A
+  second `repository.Store` (`repository/postgres`, driver `postgres`) implementing
+  the same interfaces as SQLite — same entities, same pagination, same `ErrNotFound`
+  — with hand-written `$n`-placeholder SQL rather than a second sqlc engine, because
+  the statements are the SQLite ones and a generated package would be one more thing
+  to keep in step for no gain. Its `schema.sql` is table-for-table with SQLite's;
+  only what Postgres forces differs (`BIGINT` millis, `BOOLEAN` flags, `BIGSERIAL`
+  for `processes.index_id`). The store every controller and the scheduler hold is a
+  **`repository.Switchable` facade** that resolves the live backend per call, so a
+  `POST /database/switch` probes and opens the candidate first and only repoints on
+  success — a mistyped URI costs an error message, not the service — and closes the
+  old connection after a grace period so in-flight requests finish. `/database`
+  reports the live driver and source with the password masked, `/database/test`
+  probes a candidate (reachable? writable? vector memory?) creating nothing, and
+  `/database/reset` forgets the saved selection. The selection is saved to
+  `DB_CONFIG_FILE` (`0600`, since it holds the URI's password) and **wins over
+  `DB_DRIVER`/`DB_SOURCE`** on the next boot, so a decision made in the panel
+  survives a restart until it is reset. New env: `DB_CONFIG_FILE`,
+  `DB_VECTOR_SOURCE`, `DB_LOCAL_TABLES`. _(morph-api)_
+- **Vector memory is its own engine, serving both backends.** The sqlite-vec index
+  moved out of the SQLite repository into `repository/sqlite.VectorIndex`, because a
+  Postgres deployment holds its store rows and document tables in Postgres but still
+  indexes embeddings with sqlite-vec — no pgvector requirement, and a vector store
+  built before a switch stays searchable after it. Nothing in the index reads
+  `memory_stores`; a store's id and captured embedding config are all it needs, so
+  either backend's bookkeeping works with it. `DB_VECTOR_SOURCE` names the sqlite
+  file (the deployment's own by default); `off` declines vector memory outright, so
+  creating a vector store fails with that reason instead of half-working. _(morph-api)_
+- **`DB_LOCAL_TABLES` — the entities a Postgres deployment keeps local.** Some tables
+  are a deployment's keys rather than its records: the node settings profiles and the
+  Connect gateway tokens. `DB_LOCAL_TABLES=config` keeps those two in the local SQLite
+  file while everything else goes to Postgres; any entity key from the list
+  (`workflows contexts memory prompts hitl settings processes extensions triggers
+  connect telegram`, or `all`) is accepted, and a typo is a **startup error** rather
+  than a table silently sent to the wrong database. _(morph-api)_
+- **A database panel in Settings.** `DatabasePanel.vue` reads the live backend and
+  health, probes a candidate before committing, and performs the switch/reset — the
+  UI half of the `/database` endpoints, so moving from SQLite to a managed Postgres is
+  a screen rather than a redeploy. _(morph-wapp)_
+- **`preferences.entry` — the input a flow asks for, as a declared form.** A flow that
+  needs data it cannot fetch itself (the order to review, the threshold to apply, the
+  recipient) declares an **entry form** instead of a node that invents one.
+  `form.schema` is *either* a JSON Schema — rendered with every control, default, enum
+  and validation rule the plugin form-builder supports — *or* a plain JSON object of
+  values to seed, the quick way to hand a flow a fixed shape (told apart by whether it
+  declares `$schema` or non-empty `properties`). `target` is the one context location
+  the answers are written to (`$._entry` by default; a plain member path, since a write
+  needs exactly one destination — array, wildcard and filter paths are refused);
+  `prefill` is `default` (the schema's own defaults) or `live` (whatever already sits
+  at `target` in the context this run goes against, what a re-run over a long-lived
+  context wants); `required: true` refuses a launch that supplies nothing and finds
+  nothing at the target. It is the declarative replacement for the `js`-node-seed
+  pattern: the data arrives **validated, before the first node runs**, from whoever
+  launched the flow, and downstream nodes read it like anything else
+  (`{{$._entry.orderId}}`). Served, not assembled by each client — `GET
+  /flow/id/:id/entry` resolves the form for one launch (what the fields should start
+  at depends on prefill and on the run's context), so launcher, agent-over-MCP and
+  installer all get the same answer. Read and written on their own routes (`GET`/`PUT
+  /flow/id/:id/preferences`) so a dialog changing a schema never resends the whole
+  graph. The designer preamble documents it, including the warning that an entry is
+  **input that may not arrive**. _(morph-api)_
+- **The launcher renders the entry form.** `FlowEntryButton` and `FlowEntryForm`
+  collect the declared input and `RunFlowButton` launches with it, resolving the form
+  through `GET …/entry` so the fields start where the flow's prefill mode says. The AI
+  graph builder (`aiGraph.ts`) emits `preferences.entry` where it used to wire a seed
+  `js` node, and import/export carry the preferences. _(morph-wapp)_
+- **Tags on flows.** A normalized label list on each flow (`NormalizeTags`: trimmed,
+  lower-cased, inner whitespace to dashes, de-duplicated first-seen, empties dropped,
+  commas and quotes stripped rather than escaped so a tag cannot match the wrong rows
+  through the comma-delimited filter), capped at 32 tags of 64 chars. Written through
+  a dedicated `PUT /flow/id/:id/tags` so relabelling does not resend the graph, read
+  back as a filter on `GET` (a membership test), and carried through import, export
+  and the MCP workflow tools. A `nil` tag list on an upsert means "keep what is
+  stored"; an empty non-nil list clears them. _(morph-api, morph-wapp)_
+- **Four new plugin-catalog entries, two of them a new kind — a coding agent as a
+  node.** **Claude Agent** (`CLAUDE AGENT`, Node SDK) runs Claude Code on the plugin's
+  own host in a real working tree: a durable session per call site, structured answers
+  from a JSON Schema, and a **"Needs a human" outbound port** that parks the session on
+  a question and resumes it with the reply — reach for it when the task is *do this in
+  this repo*, not *answer this*. **Codex Agent** (`CODEX AGENT`, Python SDK, beta) is
+  its OpenAI counterpart, a durable Codex thread fenced by the OS sandbox
+  (Seatbelt/bubblewrap) with the same schema answers and human port. **Microsoft SQL
+  Server** (`MSSQL`, Go SDK) runs T-SQL as four nodes — read, write, insert/upsert,
+  create-table-if-not-exists — against any TDS server `microsoft/go-mssqldb` supports
+  (SQL Server 2012+, Azure SQL, Managed Instance), with `@pN`-bound parameters and
+  `{{$.path}}` tokens, as the Go sibling of the Postgres plugin. _(plugin-catalog)_
+
+### Changed
+
+- **The node settings view is redesigned into grouped buckets.** `NodeSettingsView`
+  and the settings modal now organise a node's settings through a `settingsBuckets`
+  layer rather than one flat list, with the node registry and extension refs feeding
+  it — the same profiles, laid out so a node with many settings is readable.
+  _(morph-wapp)_
+- **`@inflowenger/inflow-form-builder` bumped to v0.2.2** to fix and align the refresh
+  button beside a multi-select control. _(morph-wapp)_
+
+### Maintenance
+
+- Test coverage for everything new: the Postgres adapter (`postgres_test.go`, ~940
+  lines across every entity), the `Switchable` facade, the tag normalizer and its
+  nil/empty semantics (`tags_test.go`, `workflow_test.go`), the entry form and its
+  resolution (`preferences_test.go`, `entry_test.go`), and the context-path writer
+  that seeds the entry target (`contextpath_test.go`). _(morph-api)_
+- The `flow-cookbook` offset lagged a release: `prescription-intake-router` was
+  written up in full in v0.4.5, but the lock recorded the commit *before* its final
+  flow landed, so the generator re-listed it this window. Nothing new — the only
+  commit in range is a revision of that already-documented recipe's flow JSON. The
+  offset now sits past it. _(getting-started)_
+
+### Baked from
+
+| Component           | Ref    | Commit    |
+| ------------------- | ------ | --------- |
+| `morph-api`         | `main` | `322ebc6` |
+| `morph-wapp`        | `main` | `bbb2b2c` |
+| `builtin-plugins`   | `main` | `0aa9f51` |
+| `inflow-plugin-sdk` | `main` | `4a641c8` |
+| `node-plugin-sdk`   | `main` | `265c2f6` |
+| `plugin-catalog`    | `main` | `f1abb9c` |
 
 ## [v0.4.5] — 2026-10-12
 

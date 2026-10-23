@@ -121,7 +121,7 @@ COPY --from=wapp-build    /src/wapp/dist      /srv/www
 COPY --from=plugins-build /out/plugins        /app/plugins
 # The seed is the source of truth for the builtin nodes' PLUGIN_IDs; keep a copy
 # so the entrypoint can resolve them even if the API is not answering yet.
-COPY --from=api-build     /src/api/repository/sqlite/seed/builtins.json /app/seed/builtins.json
+COPY --from=api-build     /src/api/repository/seed/builtins.json /app/seed/builtins.json
 
 COPY docker/nginx.conf.tmpl /etc/nginx/nginx.conf.tmpl
 COPY docker/entrypoint.sh   /usr/local/bin/entrypoint.sh

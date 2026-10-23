@@ -21,7 +21,7 @@
 #      container restart policy gives a clean slate.
 #
 # Each plugin's PLUGIN_ID is *not* invented here: the builtin palette nodes carry
-# hard-coded ids from morph-api's seed (repository/sqlite/seed/builtins.json), so
+# hard-coded ids from morph-api's seed (repository/seed/builtins.json), so
 # a saved workflow keeps working across reinstalls. They are read back from the
 # API (falling back to the seed file, then to a PLUGIN_ID_<NAME> override).
 #
