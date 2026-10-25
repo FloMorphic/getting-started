@@ -16,7 +16,75 @@ component from the last recorded offset to its current `main`.
 ## [Unreleased]
 
 _Run `make changelog VERSION=<next>` to draft this section from the commits landed
-across all repos since v0.4.6._
+across all repos since v0.4.7._
+
+## [v0.4.7] — 2026-10-24
+
+A small, compatibility-only release with one subject: **the plugin an installer
+deliberately does not choose.**
+
+FloMorphic is increasingly the process definer *underneath* another product, and
+such an app **installs** its flows rather than drawing them. On import, a plugin
+node binds by the exact `(pluginId, action)` pair the document carries, and
+failing that by action alone — any local plugin exposing the method answers it.
+That fallback is right when one plugin serves an action and wrong when several
+do: in SurfStat every channel is its own plugin, so a flow calling one action has
+as many valid bindings as there are channels installed, and taking the first that
+answers looks settled while being a guess.
+
+So a node may now **opt out of the action-only match** — `data.bindPlugin:
+"manual"` in the flow document. It lands unbound and badged, and its drawer
+offers a pick of the installed plugins serving that action. It is **not** reported
+as a missing plugin, because nothing needs installing; the marker **survives a
+re-install** so the choice is withheld again, and **clears the moment a plugin is
+bound**, so a hand-bound node never unbinds itself on the next pass. Both import
+paths honour it — the backend flowfile installer and the canvas's own patch
+stamper — which is the whole point: an upper-layer app and the canvas agree on
+what an unbound node means.
+
+### Added
+
+- **`data.bindPlugin: "manual"` — a plugin node that withholds its own binding.**
+  `stampIdentities` still clears any identity the document carried and still binds
+  an exact `(pluginId, action)` pair, but with the marker set it skips the
+  action-only fallback: the node keeps its `missingPlugin` display info for the
+  canvas, stays out of `MissingActions` (which means *install this plugin*, and
+  nothing here is uninstalled), and retains the marker so a later re-install
+  withholds the choice again. An exact pair — which is what the drawer writes when
+  the operator picks — binds and deletes the marker. _(morph-api)_
+- **The same opt-out on the canvas's import path.** `stampPluginRef` in
+  `WorkflowCanvas.vue` honours `bindPlugin: "manual"` identically when applying a
+  planned patch, so a flow installed through the UI and the same flow installed
+  through the API land in the same state. _(morph-wapp)_
+
+### Changed
+
+- **A withheld plugin reads as a choice, not a failure.** The node drawer's warning
+  for an unbound plugin action now distinguishes the two cases: *"Pick a plugin for
+  this node"* with an explanation that more than one local plugin can serve the
+  action and nothing guessed which one the flow meant (and that every node using it
+  follows the pick, while a run errors until one is made), instead of the
+  *"Unrecognized plugin — nothing installed here provides this yet"* text, which is
+  now shown only when that is actually true. _(morph-wapp)_
+
+### Compatibility
+
+- Purely additive to the flow-document contract. A document without `bindPlugin`
+  imports exactly as it did in v0.4.6, and an older FloMorphic carries the field
+  through as an unknown one and binds by action as before — so an installer can
+  emit it today and it simply has no effect until the node is on v0.4.7. No API,
+  schema or environment changes; no migration.
+
+### Baked from
+
+| Component           | Ref    | Commit    |
+| ------------------- | ------ | --------- |
+| `morph-api`         | `main` | `ef2863e` |
+| `morph-wapp`        | `main` | `de2dcda` |
+| `builtin-plugins`   | `main` | `0aa9f51` |
+| `inflow-plugin-sdk` | `main` | `4a641c8` |
+| `node-plugin-sdk`   | `main` | `265c2f6` |
+| `plugin-catalog`    | `main` | `f1abb9c` |
 
 ## [v0.4.6] — 2026-10-23
 
@@ -2260,7 +2328,9 @@ across the API, the canvas and both plugin SDKs.
 | `inflow-plugin-sdk` | `main` | `96d24b9` |
 | `node-plugin-sdk`   | `main` | `f50c101` |
 
-[Unreleased]: https://github.com/FloMorphic/getting-started/compare/v0.4.5...HEAD
+[Unreleased]: https://github.com/FloMorphic/getting-started/compare/v0.4.7...HEAD
+[v0.4.7]: https://github.com/FloMorphic/getting-started/compare/v0.4.6...v0.4.7
+[v0.4.6]: https://github.com/FloMorphic/getting-started/compare/v0.4.5...v0.4.6
 [v0.4.5]: https://github.com/FloMorphic/getting-started/compare/v0.4.4...v0.4.5
 [v0.4.4]: https://github.com/FloMorphic/getting-started/compare/v0.4.3...v0.4.4
 [v0.4.3]: https://github.com/FloMorphic/getting-started/compare/v0.4.2...v0.4.3
