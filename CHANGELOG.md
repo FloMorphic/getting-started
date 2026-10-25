@@ -16,7 +16,173 @@ component from the last recorded offset to its current `main`.
 ## [Unreleased]
 
 _Run `make changelog VERSION=<next>` to draft this section from the commits landed
-across all repos since v0.4.7._
+across all repos since v0.4.8._
+
+## [v0.4.8] — 2026-10-25
+
+Two subjects, one sentence between them: **tell the author what the engine would
+find, where they can still do something about it.** A deadlocked join and an
+ambiguous plugin binding are both mistakes that used to surface as a run — one
+that hangs, or one that quietly worked on the wrong database. Both are now
+reported on the canvas, and **neither refuses anything.**
+
+**The graph is checked when it is saved.** `POST /flow` compiles the record it
+just stored and answers with a `validation` report beside it: a node whose
+`depends` waits on a step that can only run *after* it (the first crossing
+deadlocks there), a node whose builder refused its data, a node nothing
+reaches. Every issue names the node, the edge to re-point, the ids that edge may
+legally point at instead, and a suggested fix — enough for the editor to
+highlight the canvas, which it now does from a dismissible banner whose rows
+take you to the node. There is also a **Check** button for a flow opened from
+the list, and the same report rides on imports and the MCP designer tools, so an
+agent repairing a draft gets the issue list rather than one sentence.
+
+**Nothing is gated on it,** and that is a design decision rather than caution.
+These findings describe *one* traversal — the one starting at the flow's
+`startNode` — while a run need not be that traversal: a HITL resume and a
+Continue After enter at the nodes the parked node handed back, several of them
+mid-graph, with the engine seeding the earlier run's traversal state; a partial
+run enters at a node the operator picked. A join the guard calls deadlocked may
+be the join a resume has already satisfied. So the guard is asked for where a
+flow is **edited** and left off everywhere a flow **runs** — no save, launch,
+resume, trigger fire or scheduled run is refused over it, and no status code
+moves. A node that genuinely did not compile is still an error, exactly as
+before.
+
+**The second subject is the other half of v0.4.7:** the ambiguous plugin node
+that now holds itself back without an installer's help. v0.4.7 gave a document a
+way to say *do not guess this one* (`data.bindPlugin: "manual"`); but what that
+marker records is not a fact about the flow — it is a fact about the install
+reading it, namely *how many plugins here serve this action*. So the import
+decides it itself. An action **several** registered plugins serve no longer
+binds: the document names the action, never the plugin (a `pluginId` is a
+per-install address), so with two plugins answering `mssql.query` nothing in the
+file says which one the flow meant, and binding the first that answers looks
+settled while running against the wrong database. The node is kept, left
+unbound, stamped with the same marker, and reported in a new `unboundNodes`
+list — apart from `missingActions`, because nothing is missing. Deciding it once
+here is what keeps every installer from having to detect it separately, and each
+one that forgot from binding the wrong plugin.
+
+### Added
+
+- **`validation` on the save response.** `POST /flow` returns the saved
+  `FlowRecord` (embedded, so every existing client reads it unchanged) plus the
+  compile pass over it: `ok`, `startNodeId`, `errorCount`, `warningCount` and
+  `issues`, each with `code`, `severity`, `nodeId`, `dependsOn`, `edgeId`,
+  `message`, `suggestion` and `suggestedTargets`. Guard codes —
+  `depend_deadlock`, `depend_unreachable`, `depend_unknown_node`, `depend_self`,
+  `depend_without_edge`, `node_unreachable` — are advice; lowering codes —
+  `start_node_missing`, `node_build_failed`, `plugin_account_unresolved` — are
+  what `compileError` and a `422` were always about. `inflow.IsGuardCode` draws
+  the line, and `Diagnostics.CompileErr()` is the "did this lower?" answer with
+  every guard verdict left out. _(morph-api)_
+- **`GET /flow/id/:id/compile?validate=true` — the same report on demand,**
+  saving nothing. Always `200` with the lowered nodes; plain `/compile` lowers
+  only, as before. _(morph-api)_
+- **A validation banner over the canvas, and a Check button.** After a save (or
+  an explicit Check) the findings appear in a dismissible, never-modal banner —
+  errors red, warnings amber — that leads with *"Saved — the flow is stored and
+  runnable"*, because it is advice and the save already happened. Each row
+  reveals what it names: the canvas selects the node or edge, clears any
+  previous selection, opens the drawer and pans to frame it (both ends of an
+  edge, so a connection to re-point is shown with the nodes it runs between).
+  Check reads the **last saved** graph and says so when there are unsaved
+  changes. _(morph-wapp)_
+- **The same report on every path that lands a flow.** `POST /flow/import`,
+  `flo_apply_patch`, `flo_plan_patch` and `flo_get_workflow?compile=true` all
+  carry `validation` — landing a document is a save. `flo_get_workflow` no
+  longer raises a tool error on a graph that would not lower: it answers
+  `ok: false` with the issue list, which an agent can repair from and
+  `flo_plan_patch` again, instead of one flattened sentence. Their
+  `compileError` / `ok` fields keep their old, narrower meaning. _(morph-api)_
+- **`details` on the error envelope.** `ErrorResponse` may now carry a
+  machine-readable half for refusals whose message is not enough to act on — a
+  `422` from `/compile` puts its diagnostics there so the editor can highlight
+  the canvas. Omitted entirely otherwise, which is most refusals. _(morph-api)_
+- **`unboundNodes` on every import result.** The REST import, the designer's
+  plan/apply MCP tools and the workflow MCP import all return the plugin nodes
+  the import would not choose for: ref, title, action, the plugin the document's
+  manifest named, the **installed plugins that serve it** (what the drawer will
+  offer), and `withheld: true` when the document asked for the pick rather than
+  the install finding the action ambiguous. _(morph-api)_
+- **The import dialog says so before the import, not after.** When a flow calls
+  an action more than one installed plugin serves, the review panel names the
+  action and the plugins competing for it, and says those nodes land unbound on
+  purpose — not a blocker, just the pick the operator is about to make.
+  _(morph-wapp)_
+- **An unbound plugin node is badged from its own state.** A plugin node whose
+  action *is* installed while it carries no local `pluginId` reads as **"Pick a
+  plugin"** — warning tile, warning caption — derived from the graph rather than
+  from the importer's marker. So the badge covers every app that installs flows,
+  including ones that never set a marker, and a node left unbound any other way:
+  a cleared pick, a patch that could not stamp. _(morph-wapp)_
+
+### Changed
+
+- **`CompileFlow` replaces the old `(start, nodes, error)` compile** as the real
+  entry point: it never fails, returning whatever lowered plus the full
+  diagnostics, with the guard opt-in via `inflow.WithGuard()`. `FLowCompiler`
+  stays as the thin, guard-less wrapper the engine wire and every run path use,
+  so a running flow is never withheld over a verdict about a traversal it is not
+  making. _(morph-api)_
+- **A builder refusal is attributed to the node that refused.** The compiler's
+  walk returns a nested node's error up to its root, which filed it under the
+  *start* node's id — so a flow whose fifth node was unbound was reported as a
+  broken Start. The per-node hook records it against the node it was called for
+  instead. The guard also runs **after** the `promissall` post-pass, since a
+  fan-in node's `depends` is edge-derived and does not exist before it — a guard
+  running earlier would clear every join it is meant to judge. _(morph-api)_
+- **Action-only binding requires exactly one candidate.** Both resolvers — the
+  API's `stampIdentities` and the canvas's `stampPluginRef` — now collect every
+  plugin serving an action instead of the first, counted by `pluginId` so two
+  registrations of one plugin stay one candidate. One candidate binds as before;
+  several leave the node alone; none is still a plugin to install. An exact
+  `(pluginId, action)` pair binds in all cases, which is what the drawer's pick
+  writes. _(morph-api, morph-wapp)_
+- **A withheld marker gives way to a genuinely missing plugin.** If nothing on
+  the install serves the action, `bindPlugin` is dropped and the node reports as
+  a missing plugin: "pick one of the plugins that serve this" is not a question
+  while none does, and installing the plugin should then bind the node rather
+  than leave it asking. _(morph-api, morph-wapp)_
+- **`bindPlugin` is stripped on export,** alongside `missingPlugin`. It says
+  *several plugins here serve this action* — a property of one install's
+  extension table, not of the flow. Travelling inside a package it would hold a
+  node back on an install with no choice to make, unbound and silent. The
+  installer that needs it sets it per target. _(morph-api)_
+- `morph-api` pins `inflow-fusion` v0.4.0 (v0.3.8 → v0.4.0), which carries the
+  depends guard this release reports from — `compiler.ValidateDepends` and its
+  issue type, with the edge and the legal targets on every finding.
+  _(morph-api)_
+
+### Compatibility
+
+- **No schema, environment or migration changes.** `validation` and
+  `unboundNodes` are new fields on existing responses, and `details` is omitted
+  unless a refusal has something to add — a client that ignores all three sees
+  exactly what it saw in v0.4.7. `POST /flow` still answers the `FlowRecord`
+  fields at the top level. `bindPlugin: "manual"` behaves as it did.
+- **Nothing new refuses a request.** No guard finding changes a status code, and
+  no run path consults the guard: launches, HITL resumes, Continue After,
+  trigger fires and the scheduler compile exactly as they did. `compileError`
+  and `/compile`'s `422` keep their pre-guard meaning — *the graph did not
+  lower*.
+- **One behaviour change worth knowing before you upgrade:** on an install where
+  two or more plugins serve the same action, nodes calling it no longer bind on
+  import — they land badged and are picked in the drawer. That binding was a
+  guess; it is now a question. Installs where each action is served once are
+  unaffected.
+
+### Baked from
+
+| Component           | Ref    | Commit    |
+| ------------------- | ------ | --------- |
+| `morph-api`         | `main` | `b0b48d0` |
+| `morph-wapp`        | `main` | `eae1ee1` |
+| `builtin-plugins`   | `main` | `0aa9f51` |
+| `inflow-plugin-sdk` | `main` | `4a641c8` |
+| `node-plugin-sdk`   | `main` | `265c2f6` |
+| `plugin-catalog`    | `main` | `f1abb9c` |
 
 ## [v0.4.7] — 2026-10-24
 
@@ -2328,7 +2494,8 @@ across the API, the canvas and both plugin SDKs.
 | `inflow-plugin-sdk` | `main` | `96d24b9` |
 | `node-plugin-sdk`   | `main` | `f50c101` |
 
-[Unreleased]: https://github.com/FloMorphic/getting-started/compare/v0.4.7...HEAD
+[Unreleased]: https://github.com/FloMorphic/getting-started/compare/v0.4.8...HEAD
+[v0.4.8]: https://github.com/FloMorphic/getting-started/compare/v0.4.7...v0.4.8
 [v0.4.7]: https://github.com/FloMorphic/getting-started/compare/v0.4.6...v0.4.7
 [v0.4.6]: https://github.com/FloMorphic/getting-started/compare/v0.4.5...v0.4.6
 [v0.4.5]: https://github.com/FloMorphic/getting-started/compare/v0.4.4...v0.4.5
