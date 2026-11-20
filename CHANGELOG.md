@@ -15,8 +15,121 @@ component from the last recorded offset to its current `main`.
 
 ## [Unreleased]
 
-_Run `make changelog VERSION=<next>` to draft this section from the commits landed
-across all repos since v0.4.8._
+## [v0.4.9] — 2026-11-20
+
+**Plugins can now draw their own dialogs.** Until now a plugin's form was a JSON
+Schema document rendered by the host — right for a list of fields, hopeless for
+a query builder, a diff, a table of rows to pick from, anything that *draws*.
+Expressing those declaratively means inventing a widget vocabulary for each one
+and shipping it in FloMorphic itself, which would put the product on the
+critical path of every plugin's UI. So a form document may now name a
+**`renderer`**: when it names a code one, the plugin's own module runs inside
+the settings drawer in a sandbox — a Web Worker whose output is mirrored into
+the document as ordinary host nodes, or a null-origin frame — via the new
+`@inflowenger/plugin-sandbox` package. Two properties are what make running a
+third party's code in that drawer acceptable at all. **The settings profile
+crosses only when the form explicitly asks** — the sandbox passes it to the
+guest solely for `renderer.exposeSettings: true`; otherwise the guest reaches
+its service through a `call` the host attaches the credentials to, so it can
+use a token it is never handed. **And a failed renderer is not a failed
+node** — every plugin keeps shipping its declarative form alongside, and the
+fallback slot draws it: a blocked CDN, a browser without Workers or a plugin's
+own bug degrades the dialog, never the ability to configure the node. The API
+threads the opaque renderer descriptor through extension sync untouched
+(`FormBuilder.Renderer` → `FormParameters.Renderer`), and the canvas dedupes
+Vue across the locally-linked `@inflowenger/*` packages so two runtimes can
+never land in one page.
+
+**The flow list can now answer "which plugins does this flow need?"** A
+plugin-backed node is the one kind of node whose work happens *outside* the
+backend — a process the operator has to be running for the flow to work — which
+makes its plugins a question asked away from the canvas: by the list, by
+whatever installed the flow, by an operator about to launch one. Answering it
+meant reading the graph, the one thing a list does not load. So every save now
+**derives the plugin bill of materials from the graph and stores it beside the
+flow**: each plugin's kind (builtin vs imported extension), the actions the
+flow calls, the plugin id when the nodes are bound to one — and the unbound
+entries, the ones reporting what still has to be installed or picked, rather
+than dropping them. Alongside it the **REST list stops shipping whole graphs**
+and answers `FlowSummary` rows — title, tags, node count, the plugin list —
+and `flo_list_workflows` gains a `detail` argument: `graph` (default, the
+whole record, because an agent lists flows in order to *work* on them and a
+round trip is the cost it cares about), `document` (the portable document per
+row, roughly half the size and the readable form of a design) and `summary`
+(the cheap row, for "which flows exist" and "which plugins do these flows
+need"). The canvas flow list moves to the same summary model.
+
+### Added
+
+- **Sandboxed plugin renderers.** A form document may name a `renderer`; a code
+  one runs the plugin's own module in a Web Worker (output mirrored as host
+  nodes) or a null-origin frame, with the settings profile crossing only on
+  `renderer.exposeSettings: true` and the declarative form always drawn as the
+  fallback. New `PluginForm.vue` integration (`InflowSandboxForm`,
+  `resolveRenderer`, guest notifications) and Vue dedupe for the locally
+  consumed `@inflowenger/*` packages. _(morph-api, morph-wapp)_
+- **Plugin bill of materials per flow.** `models.CollectFlowPlugins` derives
+  which plugins a flow runs through on every save — kind, actions, bound
+  plugin id, unbound entries included — stored in a new `plugins` column
+  (schema auto-migrates; existing rows are backfilled at startup). A saved
+  graph freezes its copies at save time, so the drawer re-resolves them
+  against the store. _(morph-api)_
+- **`FlowSummary` and `detail` on `flo_list_workflows`.** The REST list
+  answers summaries (title, tags, node count, plugins) instead of full
+  records; the MCP tool keeps `graph` as its default and adds `document` and
+  `summary` modes for the cheap and the readable answer. The canvas flow list
+  syncs to the summary model. _(morph-api, morph-wapp)_
+
+### Fixed
+
+- **Multi-plugin open credential generation.** Minting an open
+  (`MultiPluginAccess`) credential could come out carrying the strict
+  permission's publish subjects, which would flip NATS's empty allow-list from
+  "allow all" to "allow only these" — stripping the plugin of `_INBOX.>` and
+  breaking every builtin node. The permission set is now built per access
+  level, against the account the credential will actually be signed on, in one
+  place (`credPermission`). _(morph-api)_
+- **Settings profile sync on the canvas.** Opening a flow now re-resolves
+  profile references against the store *before* painting, so a saved graph
+  never shows config older than the profiles it binds; profile edits broadcast
+  to sync every bound node on the change event; and one Save persists the
+  synced copies into the stored graph. _(morph-wapp)_
+- **Entry form renderer for number-typed fields** — new typed
+  enum/oneOf-enum renderers so numeric values no longer mis-render. _(morph-wapp)_
+- **Validation flow messages** reworked across the `FlowValidationBanner`
+  (clearer wording for the compile-report rows the v0.4.8 guard surfaces). _(morph-wapp)_
+
+### Maintenance
+
+- `inflow-fusion` dependency updated. _(morph-api)_
+- **Plugin catalog:** `zvec-ai` added (with its git URL corrected), and
+  `duckdb`, `redis-neo4j`, `minio` and `arangodb` added to the plugin index. _(plugin-catalog)_
+
+### Compatibility
+
+- **One automatic migration.** The `workflows` table gains a `plugins` column
+  (SQLite and Postgres); the API applies `ALTER TABLE` and backfills existing
+  rows at startup. No action, no downtime — a row written before the column
+  existed is indistinguishable from a backfilled one after first save.
+- **List responses are smaller.** `GET /flow` answers summaries instead of
+  full records; any client that opened flows by id — the canvas included — is
+  unaffected. `flo_list_workflows` changes only for callers that pass
+  `detail`; its default still returns whole records.
+- **New optional fields only.** `renderer` on the extension form parameters
+  and `plugins` on flow rows are omitted unless present; a client that ignores
+  them sees exactly what it saw in v0.4.8.
+
+### Baked from
+
+| Component           | Ref    | Commit    |
+| ------------------- | ------ | --------- |
+| `morph-api`         | `main` | `40c24c0` |
+| `morph-wapp`        | `main` | `d35aac3` |
+| `builtin-plugins`   | `main` | `0aa9f51` |
+| `inflow-plugin-sdk` | `main` | `4a641c8` |
+| `node-plugin-sdk`   | `main` | `265c2f6` |
+| `plugin-catalog`    | `main` | `efb37f4` |
+| `inflow-wiki`       | `main` | `161ce38` |
 
 ## [v0.4.8] — 2026-10-25
 
@@ -2494,7 +2607,8 @@ across the API, the canvas and both plugin SDKs.
 | `inflow-plugin-sdk` | `main` | `96d24b9` |
 | `node-plugin-sdk`   | `main` | `f50c101` |
 
-[Unreleased]: https://github.com/FloMorphic/getting-started/compare/v0.4.8...HEAD
+[Unreleased]: https://github.com/FloMorphic/getting-started/compare/v0.4.9...HEAD
+[v0.4.9]: https://github.com/FloMorphic/getting-started/compare/v0.4.8...v0.4.9
 [v0.4.8]: https://github.com/FloMorphic/getting-started/compare/v0.4.7...v0.4.8
 [v0.4.7]: https://github.com/FloMorphic/getting-started/compare/v0.4.6...v0.4.7
 [v0.4.6]: https://github.com/FloMorphic/getting-started/compare/v0.4.5...v0.4.6
