@@ -15,6 +15,98 @@ component from the last recorded offset to its current `main`.
 
 ## [Unreleased]
 
+## [v0.5.0] — 2026-11-21
+
+**Settings profiles now stay in step with the flow that binds them.** A node
+does not hold a pointer to a profile; it holds a *copy* of the profile's values,
+frozen when the flow was saved, because the compiler ships that copy without
+reading the profile store. Correct at save time, wrong the moment the profile is
+edited anywhere else — and the canvas's attempts to correct it were making
+things worse. Opening a flow marked it unsaved: Vue Flow reports node measurement
+and selection through the same `nodes-change` event as an actual edit, so merely
+painting the canvas armed the Save button. The refresh itself fetched profiles
+per node instead of per distinct profile, compared them with
+`JSON.stringify` — which calls the same values changed whenever the store returns
+keys in another order, producing an endless "N nodes re-synced" notice — and a
+single failed read was treated as "profile deleted", wiping the values out of
+the graph. A Save pressed while the sweep was still in flight could write the
+pre-sweep copies back.
+
+All of that now lives in one module, **`lib/profileSync`**. Only
+`add`/`remove`/`position`/`reset` count as author edits, so a freshly opened flow
+is clean. Each distinct profile id is read once, not once per bound node. Values
+are compared with a key-order-insensitive fingerprint, so a JSONB round trip is
+not a change. **Only a definite 404 clears a copy** — a transient network or
+server error leaves the node alone. A **reference-only** node (HITL, whose
+provider config the backend reads by id at run time) takes only the profile's
+label and never its values; a stray `settings` copy from an old save or an
+imported file is stripped. Opening a flow paints the saved graph immediately and
+sweeps in the background, and a clean flow persists the corrected copies so the
+next open is clean too. A Save waits for the in-flight sweep, and background
+writes use an edit epoch so they never clear a newer edit. Saving a profile from
+a node's drawer now updates the picker from the response directly, closing the
+window where a Save could write the old values back.
+
+**An entry form survives the round trip through a flow file.** Export asks the
+store for the flow's current entry form — a pending imported form wins, because
+the file describes the canvas as it stands — and falls back to the in-memory copy
+only when the store cannot be read. A file exported during a slow load or after
+the form was edited in another tab therefore no longer silently ships without
+it. On import, **Replace canvas** adopts the file's entry form the way it adopts
+the file's graph; **Add** adopts it only when the flow has none of its own, so a
+merge still cannot overwrite a form behind the author's back. The import dialog
+now resets the previous file's form between picks and shows an **Entry form**
+badge in the review, so the answer to "did the form come with it?" is visible
+before applying.
+
+### Fixed
+
+- **A freshly opened flow no longer reads as unsaved.** Vue Flow's `dimensions`
+  and `select` changes are ignored when tracking dirty state; only real edits
+  arm Save. _(morph-wapp)_
+- **Settings-profile refresh is quiet and safe.** One store read per distinct
+  profile id, key-order-insensitive comparison (no more endless re-sync
+  notices), transient read failures leave copies intact, and reference-only
+  nodes never carry `settings` — stray copies are stripped. _(morph-wapp)_
+- **A Save cannot write stale profile copies.** The editor awaits the in-flight
+  sweep before reading the graph, and the background persist pass steps back
+  when the author is saving. _(morph-wapp)_
+- **Profile edits from the drawer land immediately.** The saved record is
+  written onto the picker and the canvas without a reload round trip, so a Save
+  in that window cannot persist the previous values. _(morph-wapp)_
+- **Background sync never clobbers newer edits.** An edit epoch guards the dirty
+  marker, and stale load/save responses are ignored after navigation. _(morph-wapp)_
+- **Exports keep the flow's entry form.** The stored form is fetched at export
+  time (a pending imported form takes precedence), instead of trusting a copy
+  that may predate an edit made on the entry-form route. _(morph-wapp)_
+- **Replace imports adopt the file's entry form; Add imports do not overwrite an
+  existing one.** The import dialog also clears the previous file's form between
+  picks and badges whether the file carries one. _(morph-wapp)_
+
+### Compatibility
+
+- **Canvas-only release.** No API, schema or environment changes and no
+  migration; the API stays at the v0.4.9 commit (`40c24c0`). Flows, credentials
+  and extensions are untouched.
+- **Flow documents are unchanged.** Exports still carry the same `settingsId`
+  references (never profile values), and now reliably include the entry form.
+  A file without one imports exactly as before.
+- **Behaviour, not contract.** The dirty-state and profile-refresh fixes change
+  what the editor writes and when, not the JSON it stores; a flow saved by
+  v0.4.9 opens and runs unchanged.
+
+### Baked from
+
+| Component           | Ref    | Commit    |
+| ------------------- | ------ | --------- |
+| `morph-api`         | `main` | `40c24c0` |
+| `morph-wapp`        | `main` | `8011191` |
+| `builtin-plugins`   | `main` | `0aa9f51` |
+| `inflow-plugin-sdk` | `main` | `4a641c8` |
+| `node-plugin-sdk`   | `main` | `265c2f6` |
+| `plugin-catalog`    | `main` | `efb37f4` |
+| `inflow-wiki`       | `main` | `161ce38` |
+
 ## [v0.4.9] — 2026-11-20
 
 **Plugins can now draw their own dialogs.** Until now a plugin's form was a JSON
@@ -2607,7 +2699,8 @@ across the API, the canvas and both plugin SDKs.
 | `inflow-plugin-sdk` | `main` | `96d24b9` |
 | `node-plugin-sdk`   | `main` | `f50c101` |
 
-[Unreleased]: https://github.com/FloMorphic/getting-started/compare/v0.4.9...HEAD
+[Unreleased]: https://github.com/FloMorphic/getting-started/compare/v0.5.0...HEAD
+[v0.5.0]: https://github.com/FloMorphic/getting-started/compare/v0.4.9...v0.5.0
 [v0.4.9]: https://github.com/FloMorphic/getting-started/compare/v0.4.8...v0.4.9
 [v0.4.8]: https://github.com/FloMorphic/getting-started/compare/v0.4.7...v0.4.8
 [v0.4.7]: https://github.com/FloMorphic/getting-started/compare/v0.4.6...v0.4.7
