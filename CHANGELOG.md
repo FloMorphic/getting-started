@@ -15,6 +15,50 @@ component from the last recorded offset to its current `main`.
 
 ## [Unreleased]
 
+## [v0.5.1] — 2026-11-22
+
+**A select that disappeared only after `vite build`.** The typed enum and
+oneOf-enum renderers added in v0.4.9 fixed number-typed fields, but registered
+themselves through a named `entry` export on each `.vue` file. That works under
+`vite dev` and is not safe in a production build: plugin-vue attaches an SFC's
+template render through its **default** export (`_export_sfc`), and a bundler may
+drop that expression when only a named export is consumed. The component then
+rendered nothing — silently, because a missing renderer is only warned about in
+development — so enum selects vanished from plugin settings and entry forms in
+the shipped image while working perfectly on a developer's machine.
+
+The registry is now assembled in `PluginForm.vue` from the components' default
+exports, with the same testers and rank, so the render function is part of what
+the build keeps. Nothing else changes: the controls, their ranking over the
+vanilla renderers, and the forms that use them are the same.
+
+### Fixed
+
+- **Typed enum and oneOf-enum selects render in production builds.** The
+  renderer registry entries are built at the call site from each component's
+  default export rather than imported from a named `entry`, keeping the SFC
+  render attached through minification and tree-shaking. _(morph-wapp)_
+
+### Compatibility
+
+- **Canvas-only patch.** No API, schema or environment changes and no
+  migration; the API stays at the v0.4.9/v0.5.0 commit (`40c24c0`). Flows,
+  credentials, extensions and settings profiles are untouched.
+- **No contract change.** The same JSON Schema documents render the same
+  controls; this release only restores the typed controls in built bundles.
+
+### Baked from
+
+| Component           | Ref    | Commit    |
+| ------------------- | ------ | --------- |
+| `morph-api`         | `main` | `40c24c0` |
+| `morph-wapp`        | `main` | `374be3f` |
+| `builtin-plugins`   | `main` | `0aa9f51` |
+| `inflow-plugin-sdk` | `main` | `4a641c8` |
+| `node-plugin-sdk`   | `main` | `265c2f6` |
+| `plugin-catalog`    | `main` | `efb37f4` |
+| `inflow-wiki`       | `main` | `161ce38` |
+
 ## [v0.5.0] — 2026-11-21
 
 **Settings profiles now stay in step with the flow that binds them.** A node
@@ -2699,7 +2743,8 @@ across the API, the canvas and both plugin SDKs.
 | `inflow-plugin-sdk` | `main` | `96d24b9` |
 | `node-plugin-sdk`   | `main` | `f50c101` |
 
-[Unreleased]: https://github.com/FloMorphic/getting-started/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/FloMorphic/getting-started/compare/v0.5.1...HEAD
+[v0.5.1]: https://github.com/FloMorphic/getting-started/compare/v0.5.0...v0.5.1
 [v0.5.0]: https://github.com/FloMorphic/getting-started/compare/v0.4.9...v0.5.0
 [v0.4.9]: https://github.com/FloMorphic/getting-started/compare/v0.4.8...v0.4.9
 [v0.4.8]: https://github.com/FloMorphic/getting-started/compare/v0.4.7...v0.4.8
